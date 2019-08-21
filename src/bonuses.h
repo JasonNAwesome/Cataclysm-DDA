@@ -1,16 +1,18 @@
+#pragma once
 #ifndef BONUSES_H
 #define BONUSES_H
 
 #include <map>
 #include <vector>
+#include <string>
 
 enum damage_type : int;
 
-    class Character;
-    class JsonObject;
-    class JsonArray;
+class Character;
+class JsonObject;
+class JsonArray;
 
-    enum scaling_stat : int {
+enum scaling_stat : int {
     STAT_NULL = 0,
     STAT_STR,
     STAT_DEX,
@@ -69,13 +71,15 @@ class bonus_container
     public:
         bonus_container();
         void load( JsonObject &jo );
-        void load( JsonArray &jo, bool mult );
+        void load( JsonArray &jarr, bool mult );
 
-        float get_flat( const Character &u, affected_stat stat, damage_type type ) const;
+        float get_flat( const Character &u, affected_stat stat, damage_type dt ) const;
         float get_flat( const Character &u, affected_stat stat ) const;
 
-        float get_mult( const Character &u, affected_stat stat, damage_type type ) const;
+        float get_mult( const Character &u, affected_stat stat, damage_type dt ) const;
         float get_mult( const Character &u, affected_stat stat ) const;
+
+        std::string get_description() const;
 
     private:
         using bonus_map = std::map<affected_type, std::vector<effect_scaling>>;

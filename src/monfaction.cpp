@@ -1,8 +1,16 @@
-#include "debug.h"
 #include "monfaction.h"
-#include "json.h"
-#include <vector>
+
+#include <cstddef>
 #include <queue>
+#include <vector>
+#include <map>
+#include <set>
+#include <string>
+#include <utility>
+
+#include "debug.h"
+#include "json.h"
+#include "string_id.h"
 
 std::unordered_map< mfaction_str_id, mfaction_id > faction_map;
 std::vector< monfaction > faction_list;
@@ -12,6 +20,7 @@ void add_to_attitude_map( const std::set< std::string > &keys, mfaction_att_map 
 
 void apply_base_faction( const monfaction &base, monfaction &faction );
 
+/** @relates int_id */
 template<>
 const monfaction &int_id<monfaction>::obj() const
 {
@@ -23,12 +32,14 @@ const monfaction &int_id<monfaction>::obj() const
     return faction_list[_id];
 }
 
+/** @relates int_id */
 template<>
 const string_id<monfaction> &int_id<monfaction>::id() const
 {
     return obj().id;
 }
 
+/** @relates string_id */
 template<>
 int_id<monfaction> string_id<monfaction>::id() const
 {
@@ -40,30 +51,33 @@ int_id<monfaction> string_id<monfaction>::id() const
     return iter->second;
 }
 
+/** @relates string_id */
 template<>
 const monfaction &string_id<monfaction>::obj() const
 {
     return id().obj();
 }
 
+/** @relates string_id */
 template<>
 bool string_id<monfaction>::is_valid() const
 {
     return faction_map.count( *this ) > 0;
 }
 
+/** @relates int_id */
 template<>
 int_id<monfaction>::int_id( const string_id<monfaction> &id )
     : _id( id.id() )
 {
 }
 
-mfaction_id monfactions::get_or_add_faction( const mfaction_str_id &name )
+mfaction_id monfactions::get_or_add_faction( const mfaction_str_id &id )
 {
-    auto found = faction_map.find( name );
+    auto found = faction_map.find( id );
     if( found == faction_map.end() ) {
         monfaction mfact;
-        mfact.id = name;
+        mfact.id = id;
         mfact.loadid = mfaction_id( faction_map.size() );
         // -1 base faction marks this faction as not initialized.
         // If it is not changed before validation, it will become a child of
@@ -77,7 +91,7 @@ mfaction_id monfactions::get_or_add_faction( const mfaction_str_id &name )
     return found->second;
 }
 
-void apply_base_faction( mfaction_id base, mfaction_id faction_id )
+static void apply_base_faction( mfaction_id base, mfaction_id faction_id )
 {
     for( const auto &pair : base.obj().attitude_map ) {
         // Fill in values set in base faction, but not in derived one
@@ -189,14 +203,8 @@ void monfactions::finalize()
     faction_list.shrink_to_fit(); // Save a couple of bytes
 }
 
-// Non-const monfaction reference
-monfaction &get_faction( const mfaction_str_id &id )
-{
-    return faction_list[id.id()];
-}
-
 // Ensures all those factions exist
-void prealloc( const std::set< std::string > &facs )
+static void prealloc( const std::set< std::string > &facs )
 {
     for( const auto &f : facs ) {
         monfactions::get_or_add_faction( mfaction_str_id( f ) );
@@ -216,10 +224,9 @@ void add_to_attitude_map( const std::set< std::string > &keys, mfaction_att_map 
 void monfactions::load_monster_faction( JsonObject &jo )
 {
     // Factions inherit values from their parent factions - this is set during finalization
-    std::set< std::string > by_mood, neutral, friendly;
-    by_mood = jo.get_tags( "by_mood" );
-    neutral = jo.get_tags( "neutral" );
-    friendly = jo.get_tags( "friendly" );
+    std::set< std::string > by_mood = jo.get_tags( "by_mood" );
+    std::set< std::string > neutral = jo.get_tags( "neutral" );
+    std::set< std::string > friendly = jo.get_tags( "friendly" );
     // Need to make sure adding new factions won't invalidate our current faction's reference
     // That +1 is for base faction
     faction_list.reserve( faction_list.size() + by_mood.size() + neutral.size() + friendly.size() + 1 );

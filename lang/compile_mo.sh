@@ -1,6 +1,4 @@
-#!/bin/bash
-
-oldpwd=`pwd`
+#!/bin/sh
 
 if [ ! -d lang/po ]
 then
@@ -38,5 +36,3 @@ else
         msgfmt -f -o $LOCALE_DIR/${n}/LC_MESSAGES/cataclysm-dda.mo ${f}
     done
 fi
-
-cd $oldpwd

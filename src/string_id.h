@@ -1,3 +1,4 @@
+#pragma once
 #ifndef STRING_ID_H
 #define STRING_ID_H
 
@@ -6,8 +7,6 @@
 
 template<typename T>
 class int_id;
-
-struct null_id_type;
 
 /**
  * This represents an identifier (implemented as std::string) of some object.
@@ -33,15 +32,19 @@ struct null_id_type;
  * \endcode
  * The types mtype_id and itype_id declared here are separate, the compiler will not
  * allow assignment / comparison of mtype_id and itype_id.
- * Note that for this to work, the template parameter type does note even need to be
- * known when the string_id is used. In fact, it does not even need to be defined at all,
- * a declaration is just enough.
+ * Note that a forward declaration is sufficient for the template parameter type.
+ *
+ * If an id is used locally in just one header & source file, then feel free to
+ * define it in those files.  If it is used more widely (like mtype_id), then
+ * please define it in type_id.h, a central light-weight header that defines all ids
+ * people might want to use.  This prevents duplicate definitions in many
+ * files.
  */
 template<typename T>
 class string_id
 {
     public:
-        typedef string_id<T> This;
+        using This = string_id<T>;
 
         /**
          * Forwarding constructor, forwards any parameter to the std::string
@@ -52,26 +55,14 @@ class string_id
         // a std::string, otherwise a "no matching function to call..." error is generated.
         template<typename S, class = typename
                  std::enable_if< std::is_convertible<S, std::string >::value>::type >
-        explicit string_id( S && id ) : _id( std::forward<S>( id ) ) {
+        explicit string_id( S && id, int cid = -1 ) : _id( std::forward<S>( id ) ), _cid( cid ) {
         }
         /**
          * Default constructor constructs an empty id string.
          * Note that this id class does not enforce empty id strings (or any specific string at all)
          * to be special. Every string (including the empty one) may be a valid id.
          */
-        string_id() : _id() {
-        }
-        /**
-         * Create a copy of the @ref NULL_ID. See @ref null_id_type.
-         */
-        string_id( const null_id_type & ) : _id( NULL_ID._id ) {
-        }
-        /* This is here to appease clang, which thinks there is some ambiguity in
-        `string_id<T> X = NULL_ID;`, gcc accepts it, but clang can not decide between implicit
-        move assignment operator and implicit copy assignment operator. */
-        This &operator=( const null_id_type & ) {
-            return *this = NULL_ID;
-        }
+        string_id() : _cid( -1 ) {}
         /**
          * Comparison, only useful when the id is used in std::map or std::set as key. Compares
          * the string id as with the strings comparison.
@@ -91,7 +82,12 @@ class string_id
         bool operator!=( const This &rhs ) const {
             return _id != rhs._id;
         }
-
+        /**
+         * The unusual comparator, compares the string id to char *
+         */
+        bool operator==( const char *rhs ) const {
+            return _id == rhs;
+        }
         /**
          * Interface to the plain C-string of the id. This function mimics the std::string
          * object. Ids are often used in debug messages, where they are forwarded as C-strings
@@ -109,6 +105,10 @@ class string_id
             return _id;
         }
 
+        explicit operator std::string() const {
+            return _id;
+        }
+
         // Those are optional, you need to implement them on your own if you want to use them.
         // If you don't implement them, but use them, you'll get a linker error.
         /**
@@ -120,17 +120,35 @@ class string_id
          * Returns the actual object this id refers to. May show a debug message if the id is invalid.
          */
         const T &obj() const;
+
+        const T &operator*() const {
+            return obj();
+
+        }
+        const T *operator->() const {
+            return &obj();
+        }
+
         /**
          * Returns whether this id is valid, that means whether it refers to an existing object.
          */
         bool is_valid() const;
         /**
-         * The null-id itself. `NULL_ID.is_null()` must always return true. See @ref is_null.
+         * Returns whether this id is empty. An empty id can still be valid,
+         * and emptiness does not mean that it's null. Named is_empty() to
+         * keep consistency with the rest is_.. functions
          */
-        static const string_id<T> NULL_ID;
+        bool is_empty() const {
+            return _id.empty();
+        }
+        /**
+         * Returns a null id whose `string_id<T>::is_null()` must always return true. See @ref is_null.
+         * Specializations are defined in string_id_null_ids.cpp to avoid instantiation ordering issues.
+         */
+        static const string_id<T> &NULL_ID();
         /**
          * Returns whether this represents the id of the null-object (in which case it's the null-id).
-         * Note that not all types @ref T may have a null-object. As such, there won't be a
+         * Note that not all types assigned to T may have a null-object. As such, there won't be a
          * definition of @ref NULL_ID and if you use any of the related functions, you'll get
          * errors during the linking.
          *
@@ -140,7 +158,7 @@ class string_id
          * that require a (valid) id, but it can still represent a "don't use it" value.
          */
         bool is_null() const {
-            return operator==( NULL_ID );
+            return operator==( NULL_ID() );
         }
         /**
          * Same as `!is_null`, basically one can use it to check for the id referring to an actual
@@ -158,8 +176,25 @@ class string_id
         explicit operator bool() const {
             return !is_null();
         }
+
+        // TODO: Exposed for now. Hide these and make them accessible to the generic_factory only
+
+        /**
+         * Assigns a new value for the cached int id.
+         */
+        void set_cid( const int_id<T> &cid ) const {
+            _cid = cid.to_i();
+        }
+        /**
+         * Returns the current value of cached id
+         */
+        int_id<T> get_cid() const {
+            return int_id<T>( _cid );
+        }
+
     private:
         std::string _id;
+        mutable int _cid;
 };
 
 // Support hashing of string based ids by forwarding the hash of the string.
@@ -171,38 +206,6 @@ struct hash< string_id<T> > {
         return hash<std::string>()( v.str() );
     }
 };
-}
-
-/**
- * Instances of this type are *implicitly* convertible to string_id<T> (with any kind of T).
- * There is also the global constant @ref NULL_ID, which should be the only instance of this
- * struct you'll ever need.
- * Together they allow this neat code:
- * \code
- * string_id<Foo> foo_id( NULL_ID );
- * string_id<Bar> bar_id( NULL_ID );
- *
- * string_id<X> x_id = NULL_ID;
- * string_id<Y> get_id() { return NULL_ID; }
- * \endcode
- *
- * The neat thing is that NULL_ID works for *all* types of string_id, without explicitly stating
- * what the template parameter should be. The compiler should figure it out on its own.
- *
- * However, note that you can not call string_id functions on a NULL_ID object. The object doesn't
- * known which actual string_id it refers to. In that case, use the @ref string_id<T>::NULL_ID
- * directly.
- */
-struct null_id_type {
-    template<typename T>
-    operator const string_id<T> &() const {
-        return string_id<T>::NULL_ID;
-    }
-};
-
-namespace
-{
-const null_id_type NULL_ID{};
-}
+} // namespace std
 
 #endif

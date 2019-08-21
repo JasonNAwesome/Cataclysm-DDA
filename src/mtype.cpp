@@ -1,51 +1,57 @@
 #include "mtype.h"
-#include "creature.h"
-#include "translations.h"
-#include "monstergenerator.h"
-#include "mondeath.h"
-#include "field.h"
 
 #include <algorithm>
+#include <cmath>
+
+#include "creature.h"
+#include "field.h"
+#include "item.h"
+#include "itype.h"
+#include "mondeath.h"
+#include "monstergenerator.h"
+#include "translations.h"
+#include "mapdata.h"
 
 const species_id MOLLUSK( "MOLLUSK" );
 
 mtype::mtype()
 {
-    id = NULL_ID;
+    id = mtype_id::NULL_ID();
     name = "human";
     name_plural = "humans";
-    description = "";
     sym = " ";
     color = c_white;
     size = MS_MEDIUM;
-    mat = {"flesh"};
+    volume = 62499_ml;
+    weight = 81499_gram;
+    mat = { material_id( "flesh" ) };
     phase = SOLID;
-    difficulty = 0;
-    agro = 0;
-    morale = 0;
-    speed = 0;
-    attack_cost = 100;
-    melee_skill = 0;
-    melee_dice = 0;
-    melee_sides = 0;
-    sk_dodge = 0;
-    armor_bash = 0;
-    armor_cut = 0;
-    armor_stab = 0;
-    armor_acid = 0;
-    armor_fire = 0;
-    hp = 0;
     def_chance = 0;
     upgrades = false;
     half_life = -1;
-    upgrade_into = NULL_ID;
-    upgrade_group = NULL_ID;
+    age_grow = -1;
+    upgrade_into = mtype_id::NULL_ID();
+    upgrade_group = mongroup_id::NULL_ID();
+
+    reproduces = false;
+    baby_count = -1;
+    baby_monster = mtype_id::NULL_ID();
+    baby_egg = "null";
+
+    biosignatures = false;
+    biosig_item = "null";
+
+    burn_into = mtype_id::NULL_ID();
     dies.push_back( &mdeath::normal );
     sp_defense = nullptr;
+    harvest = harvest_id( "human" );
     luminance = 0;
-    flags.insert( MF_HUMAN );
-    flags.insert( MF_BONES );
-    flags.insert( MF_LEATHER );
+    bash_skill = 0;
+
+    flags
+    .set( MF_HUMAN )
+    .set( MF_BONES )
+    .set( MF_LEATHER );
 }
 
 std::string mtype::nname( unsigned int quantity ) const
@@ -60,46 +66,48 @@ bool mtype::has_special_attack( const std::string &attack_name ) const
 
 bool mtype::has_flag( m_flag flag ) const
 {
-    return bitflags[flag];
+    return flags[flag];
 }
 
-bool mtype::has_flag( std::string flag ) const
+void mtype::set_flag( m_flag flag, bool state )
 {
-    return has_flag( MonsterGenerator::generator().m_flag_from_string( flag ) );
+    flags.set( flag, state );
 }
 
-void mtype::set_flag( std::string flag, bool state )
-{
-    if( state ) {
-        flags.insert( MonsterGenerator::generator().m_flag_from_string( flag ) );
-    } else {
-        flags.erase( MonsterGenerator::generator().m_flag_from_string( flag ) );
-    }
-}
-
-bool mtype::has_material( const std::string &material ) const
+bool mtype::made_of( const material_id &material ) const
 {
     return std::find( mat.begin(), mat.end(),  material ) != mat.end();
 }
 
-bool mtype::has_anger_trigger( monster_trigger trig ) const
+bool mtype::made_of_any( const std::set<material_id> &materials ) const
 {
-    return bitanger[trig];
+    if( mat.empty() ) {
+        return false;
+    }
+
+    return std::any_of( mat.begin(), mat.end(), [&materials]( const material_id & e ) {
+        return materials.count( e );
+    } );
 }
 
-bool mtype::has_fear_trigger( monster_trigger trig ) const
+bool mtype::has_anger_trigger( mon_trigger trigger ) const
 {
-    return bitfear[trig];
+    return anger[trigger];
 }
 
-bool mtype::has_placate_trigger( monster_trigger trig ) const
+bool mtype::has_fear_trigger( mon_trigger trigger ) const
 {
-    return bitplacate[trig];
+    return fear[trigger];
 }
 
-bool mtype::in_category( std::string category ) const
+bool mtype::has_placate_trigger( mon_trigger trigger ) const
 {
-    return ( categories.find( category ) != categories.end() );
+    return placate[trigger];
+}
+
+bool mtype::in_category( const std::string &category ) const
+{
+    return categories.find( category ) != categories.end();
 }
 
 bool mtype::in_species( const species_id &spec ) const
@@ -122,7 +130,7 @@ bool mtype::same_species( const mtype &other ) const
     return false;
 }
 
-field_id mtype::bloodType() const
+field_type_id mtype::bloodType() const
 {
     if( has_flag( MF_ACID_BLOOD ) )
         //A monster that has the death effect "ACID" does not need to have acid blood.
@@ -135,30 +143,30 @@ field_id mtype::bloodType() const
     if( has_flag( MF_LARVA ) || has_flag( MF_ARTHROPOD_BLOOD ) ) {
         return fd_blood_invertebrate;
     }
-    if( has_material( "veggy" ) ) {
+    if( made_of( material_id( "veggy" ) ) ) {
         return fd_blood_veggy;
     }
-    if( has_material( "iflesh" ) ) {
+    if( made_of( material_id( "iflesh" ) ) ) {
         return fd_blood_insect;
     }
-    if( has_flag( MF_WARM ) && has_material( "flesh" ) ) {
+    if( has_flag( MF_WARM ) && made_of( material_id( "flesh" ) ) ) {
         return fd_blood;
     }
     return fd_null;
 }
 
-field_id mtype::gibType() const
+field_type_id mtype::gibType() const
 {
     if( has_flag( MF_LARVA ) || in_species( MOLLUSK ) ) {
         return fd_gibs_invertebrate;
     }
-    if( has_material( "veggy" ) ) {
+    if( made_of( material_id( "veggy" ) ) ) {
         return fd_gibs_veggy;
     }
-    if( has_material( "iflesh" ) ) {
+    if( made_of( material_id( "iflesh" ) ) ) {
         return fd_gibs_insect;
     }
-    if( has_material( "flesh" ) ) {
+    if( made_of( material_id( "flesh" ) ) ) {
         return fd_gibs_flesh;
     }
     // There are other materials not listed here like steel, protoplasmic, powder, null, stone, bone
@@ -168,16 +176,18 @@ field_id mtype::gibType() const
 itype_id mtype::get_meat_itype() const
 {
     if( has_flag( MF_POISON ) ) {
-        if( has_material( "flesh" ) || has_material( "hflesh" ) ) {
+        if( made_of( material_id( "flesh" ) ) || made_of( material_id( "hflesh" ) ) ) {
             return "meat_tainted";
-        } else if( has_material( "iflesh" ) ) {
+        } else if( made_of( material_id( "iflesh" ) ) ) {
             //In the future, insects could drop insect flesh rather than plain ol' meat.
             return "meat_tainted";
-        } else if( has_material( "veggy" ) ) {
+        } else if( made_of( material_id( "veggy" ) ) ) {
             return "veggy_tainted";
+        } else if( made_of( material_id( "bone" ) ) ) {
+            return "bone_tainted";
         }
     } else {
-        if( has_material( "flesh" ) || has_material( "hflesh" ) ) {
+        if( made_of( material_id( "flesh" ) ) || made_of( material_id( "hflesh" ) ) ) {
             if( has_flag( MF_HUMAN ) ) {
                 return "human_flesh";
             } else if( has_flag( MF_AQUATIC ) ) {
@@ -185,53 +195,34 @@ itype_id mtype::get_meat_itype() const
             } else {
                 return "meat";
             }
-        } else if( has_material( "bone" ) ) {
-            return "bone_tainted";
-        } else if( has_material( "iflesh" ) ) {
+        } else if( made_of( material_id( "iflesh" ) ) ) {
             //In the future, insects could drop insect flesh rather than plain ol' meat.
             return "meat";
-        } else if( has_material( "veggy" ) ) {
+        } else if( made_of( material_id( "veggy" ) ) ) {
             return "veggy";
+        } else if( made_of( material_id( "bone" ) ) ) {
+            return "bone";
         }
     }
     return "null";
 }
 
-bool mtype_special_attack::call( monster &mon ) const
+int mtype::get_meat_chunks_count() const
 {
-    if( function_type == ATTACK_CPP ) {
-        return cpp_function( &mon );
-    } else if( function_type == ATTACK_ACTOR_PTR ) {
-        return actor_ptr->call( mon );
+    const float ch = to_gram( weight ) * ( 0.40f - 0.02f * log10f( to_gram( weight ) ) );
+    const itype *chunk = item::find_type( get_meat_itype() );
+    return static_cast<int>( ch / to_gram( chunk->weight ) );
+}
+
+std::string mtype::get_description() const
+{
+    return _( description );
+}
+
+std::string mtype::get_footsteps() const
+{
+    for( const species_id &s : species ) {
+        return s.obj().get_footsteps();
     }
-
-    return false;
-}
-
-mtype_special_attack::~mtype_special_attack()
-{
-    if( function_type == ATTACK_ACTOR_PTR ) {
-        delete actor_ptr;
-    }
-}
-
-mtype_special_attack::mtype_special_attack( const mtype_special_attack &other )
-    : function_type( other.function_type ), cooldown( other.cooldown )
-{
-    if( function_type == ATTACK_CPP ) {
-        cpp_function = other.cpp_function;
-    } else if( function_type == ATTACK_ACTOR_PTR ) {
-        actor_ptr = other.actor_ptr->clone();
-    }
-}
-
-void mtype_special_attack::operator=( const mtype_special_attack &other )
-{
-    this->~mtype_special_attack();
-    new( this ) mtype_special_attack( other );
-}
-
-void mtype_special_attack::set_cooldown( int i )
-{
-    cooldown = i;
+    return "footsteps.";
 }

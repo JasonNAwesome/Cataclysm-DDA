@@ -1,14 +1,16 @@
+#pragma once
 #ifndef MAPBUFFER_H
 #define MAPBUFFER_H
 
-#include <map>
 #include <list>
+#include <map>
 #include <memory>
 #include <string>
-#include "enums.h"
-struct point;
-struct tripoint;
-struct submap;
+
+#include "point.h"
+
+class submap;
+class JsonIn;
 
 /**
  * Store, buffer, save and load the entire world map.
@@ -19,10 +21,8 @@ class mapbuffer
         mapbuffer();
         ~mapbuffer();
 
-        /** Load the entire world from savefiles into submaps in this instance. **/
-        void load( std::string worldname );
         /** Store all submaps in this instance into savefiles.
-         * @ref delete_after_save If true, the saved submaps are removed
+         * @param delete_after_save If true, the saved submaps are removed
          * from the mapbuffer (and deleted).
          **/
         void save( bool delete_after_save = false );
@@ -50,7 +50,7 @@ class mapbuffer
          *
          * @param x, y, z The absolute world position in submap coordinates.
          * Same as the ones in @ref add_submap.
-         * @param return NULL if the submap is not in the mapbuffer
+         * @return NULL if the submap is not in the mapbuffer
          * and could not be loaded. The mapbuffer takes care of the returned
          * submap object, don't delete it on your own.
          */
@@ -58,7 +58,7 @@ class mapbuffer
         submap *lookup_submap( const tripoint &p );
 
     private:
-        typedef std::map<tripoint, submap *> submap_map_t;
+        using submap_map_t = std::map<tripoint, submap *>;
 
     public:
         inline submap_map_t::iterator begin() {
@@ -73,6 +73,7 @@ class mapbuffer
         // if not handled carefully, this can erase in-use submaps and crash the game.
         void remove_submap( tripoint addr );
         submap *unserialize_submaps( const tripoint &p );
+        void deserialize( JsonIn &jsin );
         void save_quad( const std::string &dirname, const std::string &filename,
                         const tripoint &om_addr, std::list<tripoint> &submaps_to_delete,
                         bool delete_after_save );

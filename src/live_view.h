@@ -1,32 +1,28 @@
+#pragma once
 #ifndef LIVE_VIEW_H
 #define LIVE_VIEW_H
 
-#include "output.h" //WINDOW_PTR
+#include "point.h"
+
+namespace catacurses
+{
+class window;
+} // namespace catacurses
 
 class live_view
 {
     public:
         live_view() = default;
 
-        void init( int start_x, int start_y, int width, int height );
-        void show( int x, int y );
-        bool hide( bool refresh = true, bool force = false );
-        bool is_compact() const;
-        void set_compact( bool value );
+        void init();
+        int draw( const catacurses::window &win, int max_height );
+        void show( const tripoint &p );
+        void hide();
+
     private:
-        WINDOW_PTR w_live_view;
+        tripoint mouse_position;
 
-        int width       = 0;
-        int height      = 0;
-        int last_height = -1;
-
-        bool inuse        = false;
-        bool enabled      = false;
-        bool compact_view = false;
-
-        operator WINDOW *() const {
-            return w_live_view.get();
-        }
+        bool enabled = false;
 };
 
 #endif

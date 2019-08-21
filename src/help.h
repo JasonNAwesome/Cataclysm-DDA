@@ -1,39 +1,37 @@
+#pragma once
 #ifndef HELP_H
 #define HELP_H
 
-#include "output.h"
-#include "json.h"
+#include <map>
 #include <string>
 #include <vector>
+#include <utility>
 
-void help_draw_dir( WINDOW *win, int line_y = 0 );
-void help_main( WINDOW *win );
-void help_movement( WINDOW *win );
-void help_driving( WINDOW *win );
-void help_map( WINDOW *win );
+#include "cursesdef.h"
+#include "input.h"
 
-std::vector<std::string> text_introduction();
-std::vector<std::string> text_viewing();
-std::vector<std::string> text_hunger();
-std::vector<std::string> text_pain();
-std::vector<std::string> text_addiction();
-std::vector<std::string> text_morale();
-std::vector<std::string> text_mutation();
-std::vector<std::string> text_bionics();
-std::vector<std::string> text_crafting();
-std::vector<std::string> text_traps();
-std::vector<std::string> text_items();
-std::vector<std::string> text_combat();
-std::vector<std::string> text_styles();
-std::vector<std::string> text_tips();
-std::vector<std::string> text_types();
-std::vector<std::string> text_guns();
-std::vector<std::string> text_faq();
+class JsonIn;
 
-void display_help();
+class help
+{
+    public:
+        void load();
+        void display_help();
 
-void load_hint( JsonObject &jsobj );
-void clear_hints();
-std::string get_hint(); // return a random hint about the game
+    private:
+        void deserialize( JsonIn &jsin );
+        void draw_menu( const catacurses::window &win );
+        std::string get_note_colors();
+        std::string get_dir_grid();
+
+        std::map<int, std::pair<std::string, std::vector<std::string> > > help_texts;
+        std::vector< std::vector<std::string> > hotkeys;
+
+        input_context ctxt;
+};
+
+help &get_help();
+
+std::string get_hint();
 
 #endif

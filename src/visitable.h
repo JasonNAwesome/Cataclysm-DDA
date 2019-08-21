@@ -1,11 +1,15 @@
+#pragma once
 #ifndef VISITABLE_H
 #define VISITABLE_H
 
-#include <vector>
-#include <list>
+#include <climits>
 #include <functional>
+#include <list>
+#include <string>
+#include <vector>
 
-#include "enums.h"
+#include "cata_utility.h"
+#include "type_id.h"
 
 class item;
 
@@ -30,14 +34,13 @@ class visitable
          *
          * @return This method itself only ever returns VisitResponse::Next or VisitResponse::Abort.
          */
-        VisitResponse visit_items_with_parent(
-            const std::function<VisitResponse( item *, item * )> &func );
-        VisitResponse visit_items_with_parent_const(
-            const std::function<VisitResponse( const item *, const item * )> &func ) const;
+        VisitResponse visit_items( const std::function<VisitResponse( item *, item * )> &func );
+        VisitResponse visit_items( const std::function<VisitResponse( const item *, const item * )> &func )
+        const;
 
         /** Lightweight version which provides only the current node */
         VisitResponse visit_items( const std::function<VisitResponse( item * )> &func );
-        VisitResponse visit_items_const( const std::function<VisitResponse( const item * )> &func ) const;
+        VisitResponse visit_items( const std::function<VisitResponse( const item * )> &func ) const;
 
         /**
          * Determine the immediate parent container (if any) for an item.
@@ -59,6 +62,43 @@ class visitable
 
         /** Returns true if any item (including those within a container) matches the filter */
         bool has_item_with( const std::function<bool( const item & )> &filter ) const;
+
+        /** Returns true if instance has amount (or more) items of at least quality level */
+        bool has_quality( const quality_id &qual, int level = 1, int qty = 1 ) const;
+
+        /** Return maximum tool quality level provided by instance or INT_MIN if not found */
+        int max_quality( const quality_id &qual ) const;
+
+        /**
+         * Count maximum available charges from this instance and any contained items
+         * @param what ID of item to count charges of
+         * @param limit stop searching after this many charges have been found
+         * @param filter only count charges of items that match the filter
+         * @param visitor is called when UPS charge is used (parameter is the charge itself)
+         */
+        int charges_of( const std::string &what, int limit = INT_MAX,
+                        const std::function<bool( const item & )> &filter = return_true<item>,
+                        std::function<void( int )> visitor = nullptr ) const;
+
+        /**
+         * Count items matching id including both this instance and any contained items
+         * @param what ID of items to count. "any" will count all items (usually used with a filter)
+         * @param pseudo whether pseudo-items (from map/vehicle tiles, bionics etc) are considered
+         * @param limit stop searching after this many matches
+         * @param filter only count items that match the filter
+         * @note items must be empty to be considered a match
+         */
+        int amount_of( const std::string &what, bool pseudo = true,
+                       int limit = INT_MAX,
+                       const std::function<bool( const item & )> &filter = return_true<item> ) const;
+
+        /** Check instance provides at least qty of an item (@see amount_of) */
+        bool has_amount( const std::string &what, int qty, bool pseudo = true,
+                         const std::function<bool( const item & )> &filter = return_true<item> ) const;
+
+        /** Returns all items (including those within a container) matching the filter */
+        std::vector<item *> items_with( const std::function<bool( const item & )> &filter );
+        std::vector<const item *> items_with( const std::function<bool( const item & )> &filter ) const;
 
         /**
          * Removes items contained by this instance which match the filter

@@ -1,3 +1,26 @@
+* [General Linux Guide](#general-linux-guide)
+  * [Compiler](#compiler)
+  * [Tools](#tools)
+  * [Dependencies](#dependencies)
+  * [Make flags](#make-flags)
+* [Debian](#debian)
+  * [Linux (native) ncurses builds](#linux-native-ncurses-builds)
+  * [Linux (native) SDL builds](#linux-native-sdl-builds)
+  * [Cross-compiling to linux 32-bit from linux 64-bit](#cross-compiling-to-linux-32-bit-from-linux-64-bit)
+  * [Cross-compile to Windows from Linux](#cross-compile-to-windows-from-linux)
+  * [Cross-compile to Mac OS X from Linux](#cross-compile-to-mac-os-x-from-linux)
+  * [Cross-compile to Android from Linux](#cross-compile-to-android-from-linux)
+  * [Troubleshooting](#debian-troubleshooting)
+* [Mac OS X](#mac-os-x)
+  * [Simple build using Homebrew](#simple-build-using-homebrew)
+  * [Advanced info for Developers](#advanced-info-for-developers)
+  * [Troubleshooting](#mac-troubleshooting)
+* [Windows](#windows)
+  * [Building with Visual Studio](#building-with-visual-studio)
+  * [Building with MSYS2](#building-with-msys2)
+  * [Building with CYGWIN](#building-with-cygwin)
+* [BSDs](#bsds)
+
 # General Linux Guide
 
 To build Cataclysm from source you will need at least a C++ compiler, some basic developer tools, and necessary build dependencies. The exact package names vary greatly from distro to distro, so this part of the guide is intended to give you higher-level understanding of the process.
@@ -12,15 +35,15 @@ You have three major choices here: GCC, Clang and MXE.
 
 (Note that your distro may have separate packages e.g. `gcc` only includes the C compiler and for C++ you'll need to install `g++`.)
 
-Cataclysm is targeting C++11 standard and that means you'll need a compiler that supports it. You can easily check if your version of `g++` supports C++11 by running:
+Cataclysm is targeting C++14 standard and that means you'll need a compiler that supports it. You can easily check if your version of `g++` supports C++14 by running:
 
-    $ g++ --std=c++11
+    $ g++ --std=c++14
     g++: fatal error: no input files
     compilation terminated.
 
 If you get a line like:
 
-    g++: error: unrecognized command line option ‘--std=c++11’
+    g++: error: unrecognized command line option ‘--std=c++14’
 
 This means you'll need a newer version of GCC (`g++`).
 
@@ -41,7 +64,7 @@ There are some general dependencies, optional dependencies and then specific dep
 Rough list based on building on Arch:
 
   * General: `gcc-libs`, `glibc`, `zlib`, `bzip2`
-  * Optional: `lua51`, `gettext`
+  * Optional: `gettext`
   * Curses: `ncurses`
   * Tiles: `sdl2`, `sdl2_image`, `sdl2_ttf`, `sdl2_mixer`, `freetype2`
 
@@ -50,7 +73,6 @@ E.g. for curses build on Debian and derivatives you'll also need `libncurses5-de
 Note on optional dependencies:
 
   * `gettext` - for localization support; if you plan to only use English you can skip it
-  * `lua` - for full-fledged mods; you'll probably prefer to have it
 
 You should be able to figure out what you are missing by reading the compilation errors and/or the output of `ldd` for compiled binaries.
 
@@ -60,12 +82,13 @@ Given you're building from source you have a number of choices to make:
 
   * `NATIVE=` - you should only care about this if you're cross-compiling
   * `RELEASE=1` - without this you'll get a debug build (see note below)
+  * `LTO=1` - enables link-time optimization with GCC/Clang
   * `TILES=1` - with this you'll get the tiles version, without it the curses version
   * `SOUND=1` - if you want sound; this requires `TILES=1`
   * `LOCALIZE=0` - this disables localizations so `gettext` is not needed
-  * `LUA=1` - this enables Lua support; needed only for full-fledged mods
   * `CLANG=1` - use Clang instead of GCC
-  * `CACHE=1` - use ccache
+  * `CCACHE=1` - use ccache
+  * `USE_LIBCXX=1` - use libc++ instead of libstdc++ with Clang (default on OS X)
 
 There is a couple of other possible options - feel free to read the `Makefile`.
 
@@ -97,7 +120,7 @@ Dependencies:
 
 Install:
 
-    sudo apt-get install libncurses5-dev libncursesw5-dev build-essential
+    sudo apt-get install libncurses5-dev libncursesw5-dev build-essential astyle
 
 ### Building
 
@@ -113,16 +136,25 @@ Dependencies:
   * SDL_ttf
   * freetype
   * build essentials
+  * libsdl2-mixer-dev - Used if compiling with sound support.
 
 Install:
 
-    sudo apt-get install libsdl1.2-dev libsdl-ttf2.0-dev libfreetype6-dev build-essential
+    sudo apt-get install libsdl2-dev libsdl2-ttf-dev libsdl2-image-dev libsdl2-mixer-dev libfreetype6-dev build-essential
 
 ### Building
 
-Run:
+A simple installation could be done by simply running:
 
     make TILES=1
+
+A more comprehensive alternative is:
+
+    make -j2 TILES=1 SOUND=1 RELEASE=1 USE_HOME_DIR=1
+
+The -j2 flag means it will compile with two parallel processes. It can be omitted or changed to -j4 in a more modern processor. If there is no desire to have sound, those flags can also be omitted. The USE_HOME_DIR flag places the user files, like configurations and saves into the home folder, making It easier for backups, and can also be omitted.
+
+
 
 ## Cross-compiling to linux 32-bit from linux 64-bit
 
@@ -158,7 +190,7 @@ Install:
     mkdir -p ~/src/mxe
     git clone https://github.com/mxe/mxe.git ~/src/mxe
     cd ~/src/mxe
-    make MXE_TARGETS='x86_64-w64-mingw32.static i686-w64-mingw32.static' sdl2 sdl2_ttf sdl2_image sdl2_mixer gettext lua ncurses
+    make MXE_TARGETS='x86_64-w64-mingw32.static i686-w64-mingw32.static' sdl2 sdl2_ttf sdl2_image sdl2_mixer gettext ncurses
 
 If you are not on a Debian derivative (Linux Mint, Ubuntu, etc), you will have to use a different command than apt-get to install [the MXE requirements](http://mxe.cc/#requirements). Building all these packages from MXE might take a while even on a fast computer. Be patient. If you are not planning on building for both 32-bit and 64-bit, you might want to adjust your MXE_TARGETS.
 
@@ -167,53 +199,195 @@ If you are not on a Debian derivative (Linux Mint, Ubuntu, etc), you will have t
 Run:
 
     PLATFORM="i686-w64-mingw32.static"
-    make CROSS="~/src/mxe/usr/bin/${PLATFORM}-" TILES=1 SOUND=1 LUA=1 RELEASE=1 LOCALIZE=1
+    make CROSS="~/src/mxe/usr/bin/${PLATFORM}-" TILES=1 SOUND=1 RELEASE=1 LOCALIZE=1
 
 Change PLATFORM to x86_64-w64-mingw32.static for a 64-bit Windows build.
 
 To create nice zip file with all the required resources for a trouble free copy on Windows use the bindist target like this:
 
     PLATFORM="i686-w64-mingw32.static"
-    make CROSS="~/src/mxe/usr/bin/${PLATFORM}-" TILES=1 SOUND=1 LUA=1 RELEASE=1 LOCALIZE=1 bindist
+    make CROSS="~/src/mxe/usr/bin/${PLATFORM}-" TILES=1 SOUND=1 RELEASE=1 LOCALIZE=1 bindist
 
 ### Building (ncurses)
 
 Run:
 
     PLATFORM="i686-w64-mingw32.static"
-    make CROSS="~/src/mxe/usr/bin/${PLATFORM}-" LUA=1 RELEASE=1 LOCALIZE=1
+    make CROSS="~/src/mxe/usr/bin/${PLATFORM}-" RELEASE=1 LOCALIZE=1
+
+## Cross-compile to Mac OS X from Linux
+
+The procedure is very much similar to cross-compilation to Windows from Linux.
+Tested on ubuntu 14.04 LTS but should work on other distros as well.
+
+Please note that due to historical difficulties with cross-compilation errors, run-time optimizations are disabled for cross-compilation to Mac OS X targets. (`-O0` is specified as a compilation flag.) See [Pull Request #26564](https://github.com/CleverRaven/Cataclysm-DDA/pull/26564) for details.
+### Dependencies
+
+  * OSX cross-compiling toolchain [osxcross](https://github.com/tpoechtrager/osxcross)
+
+  * `genisoimage` and [libdmg-hfsplus](https://github.com/planetbeing/libdmg-hfsplus.git) to create dmg distributions
+
+Make sure that all dependency tools are in search `PATH` before compiling.
+
+### Setup
+
+To set up the compiling environment execute the following commands
+`git clone https://github.com/tpoechtrager/osxcross.git` to clone the toolchain
+`cd osxcross`
+`cp ~/MacOSX10.11.sdk.tar.bz2 ./tarballs/` copy prepared MacOSX SDK tarball on place. [Read more about it](https://github.com/tpoechtrager/osxcross/blob/master/README.md#packaging-the-sdk)
+`OSX_VERSION_MIN=10.7 ./build.sh to build everything`
+Note the targeted minimum supported version of OSX.
+
+Have a prepackaged set of libs and frameworks in place, since compiling with `osxcross` built-in MacPorts is rather difficult and not supported at the moment.
+Your directory tree should look like:
+
+    ~/
+    ├── Frameworks
+    │   ├── SDL2.framework
+    │   ├── SDL2_image.framework
+    │   ├── SDL2_mixer.framework
+    │   └── SDL2_ttf.framework
+    └── libs
+        ├── gettext
+        │   ├── include
+        │   └── lib
+        └── ncurses
+            ├── include
+            └── lib
+
+Populated with respective frameworks, dylibs and headers.
+Tested lib versions are libintl.8.dylib for gettext, libncurses.5.4.dylib for ncurses.
+These libs were obtained from `homebrew` binary distribution at OS X 10.11
+Frameworks were obtained from SDL official website as described in the next [section](https://github.com/CleverRaven/Cataclysm-DDA/blob/master/COMPILING.md#sdl)
+
+### Building (SDL)
+
+To build full feature tiles and sound enabled version with localizations enabled:
+
+    make dmgdist CROSS=x86_64-apple-darwin15- NATIVE=osx OSX_MIN=10.7 USE_HOME_DIR=1 CLANG=1
+      RELEASE=1 LOCALIZE=1 LANGUAGES=all TILES=1 SOUND=1 FRAMEWORK=1
+      OSXCROSS=1 LIBSDIR=../libs FRAMEWORKSDIR=../Frameworks
+
+Make sure that `x86_64-apple-darwin15-clang++` is in `PATH` environment variable.
+
+### Building (ncurses)
+
+To build full curses version with localizations enabled:
+
+    make dmgdist CROSS=x86_64-apple-darwin15- NATIVE=osx OSX_MIN=10.7 USE_HOME_DIR=1 CLANG=1
+      RELEASE=1 LOCALIZE=1 LANGUAGES=all OSXCROSS=1 LIBSDIR=../libs FRAMEWORKSDIR=../Frameworks
+
+Make sure that `x86_64-apple-darwin15-clang++` is in `PATH` environment variable.
+
+## Cross-compile to Android from Linux
+
+The Android build uses [Gradle](https://gradle.org/) to compile the java and native C++ code, and is based heavily off SDL's [Android project template](https://hg.libsdl.org/SDL/file/f1084c419f33/android-project). See the official SDL documentation [README-android.md](https://hg.libsdl.org/SDL/file/f1084c419f33/docs/README-android.md) for further information.
+
+The Gradle project lives in the repository under `android/`. You can build it via the command line or open it in [Android Studio](https://developer.android.com/studio/). For simplicity, it only builds the SDL version with all features enabled, including tiles, sound and localization.
+
+### Dependencies
+
+  * Java JDK 8
+  * SDL2 (tested with 2.0.8, though a custom fork is recommended with project-specific bugfixes)
+  * SDL2_ttf (tested with 2.0.14)
+  * SDL2_mixer (tested with 2.0.2)
+  * SDL2_image (tested with 2.0.3)
+  * libintl-lite (tested with a custom fork of libintl-lite 0.5)
+
+The Gradle build process automatically installs dependencies from [deps.zip](android/app/deps.zip).
+
+### Setup
+
+Install Linux dependencies. For a desktop Ubuntu installation:
+
+    sudo apt-get install openjdk-8-jdk-headless
+
+Install Android SDK and NDK:
+
+    wget https://dl.google.com/android/repository/sdk-tools-linux-4333796.zip
+    unzip sdk-tools-linux-4333796.zip -d ~/android-sdk
+    rm sdk-tools-linux-4333796.zip
+    ~/android-sdk/tools/bin/sdkmanager --update
+    ~/android-sdk/tools/bin/sdkmanager "tools" "platform-tools" "ndk-bundle"
+    ~/android-sdk/tools/bin/sdkmanager --licenses
+
+Export Android environment variables (you can add these to the end of `~/.bashrc`):
+
+    export ANDROID_SDK_ROOT=~/android-sdk
+    export ANDROID_HOME=~/android-sdk
+    export ANDROID_NDK_ROOT=~/android-sdk/ndk-bundle
+    export PATH=$PATH:$ANDROID_SDK_ROOT/platform-tools
+    export PATH=$PATH:$ANDROID_SDK_ROOT/tools
+    export PATH=$PATH:$ANDROID_NDK_ROOT
+
+You can also use this additional variables if you want to use `ccache` to speed up subsequnt builds:
+
+    export USE_CCACHE=1
+    export NDK_CCACHE=/usr/local/bin/ccache
+
+**Note:** Path to `ccache` can be different on your system.
+
+### Android device setup
+
+Enable [Developer options on your Android device](https://developer.android.com/studio/debug/dev-options). Connect your device to your PC via USB cable and run:
+
+    adb devices
+    adb connect <devicename>
+
+### Building
+
+To build an APK, use the Gradle wrapper command line tool (gradlew). The Android Studio documentation provides a good summary of how to [build your app from the command line](https://developer.android.com/studio/build/building-cmdline).
+
+To build a debug APK, from the `android/` subfolder of the repository run:
+
+    ./gradlew assembleDebug
+
+This creates a debug APK in `./android/app/build/outputs/apk/` ready to be installed on your device.
+
+To build a debug APK and immediately deploy to your connected device over adb run:
+
+    ./gradlew installDebug
+
+To build a signed release APK (ie. one that can be installed on a device), [build an unsigned release APK and sign it manually](https://developer.android.com/studio/publish/app-signing#signing-manually).
+
+### Additional notes
+
+The app stores data files on the device in `/sdcard/Android/data/com.cleverraven/cataclysmdda/files`. The data is backwards compatible with the desktop version.
+
+## Linux Troubleshooting
+
+If you get an error stating `make: build-scripts/validate_pr_in_jenkins: Command not found` clone a separate copy of the upstream source to a new git repository as your git setup has become corrupted by the Blob.
 
 # Mac OS X
 
-To build Cataclysm on Mac you'll need [Command Line Tools for Xcode](https://developer.apple.com/downloads/) and the [Homebrew](http://brew.sh) package manager. With Homebrew, you can easily install or build Cataclysm using the Cataclysm forumla on Homebrew Games.
+To build Cataclysm on Mac you'll need [Command Line Tools for Xcode](https://developer.apple.com/downloads/) and the [Homebrew](http://brew.sh) package manager. With Homebrew, you can easily install or build Cataclysm using the [cataclysm](https://formulae.brew.sh/formula/cataclysm) forumla.
 
 ## Simple build using Homebrew
 
+Homebrew installation will come with tiles and sound support enabled.
+
 Once you have Homebrew installed, open Terminal and run one of the following commands.
 
-For a curses build:
+For a stable tiles build:
 
-    brew install homebrew/games/cataclysm
+    brew install cataclysm
 
-For a tiles build:
+For an experimental tiles build built from the current HEAD of [master](https://github.com/CleverRaven/Cataclysm-DDA/tree/master/):
 
-    brew install homebrew/games/cataclysm --with-tiles
-
-For an experimental curses build:
-
-    brew install homebrew/games/cataclysm --HEAD
-
-For an experimental tiles build:
-
-    brew install homebrew/games/cataclysm --with-tiles --HEAD
+    brew install cataclysm --HEAD
 
 Whichever build you choose, Homebrew will install the appropriate dependencies as needed. The installation will be in `/usr/local/Cellar/cataclysm` with a symlink named `cataclysm` in `/usr/local/bin`.
 
 To launch Cataclysm, just open Terminal and run `cataclysm`.
 
-To update an experimental build, you must uninstall Cataclysm, then reinstall using one of the above commands. If you want to keep your saved games, be sure to backup the folder `/usr/local/Cellar/cataclysm/HEAD/libexec/save` first, then uninstall Cataclysm using the command:
+To update a stable tiles build simply run:
 
-    brew rm cataclysm
+    brew upgrade cataclysm
+
+To update an experimental build, you must uninstall Cataclysm then reinstall with `--HEAD`, triggering a new build from source.
+
+    brew uninstall cataclysm
+    brew install cataclysm --HEAD
 
 ## Advanced info for Developers
 
@@ -262,7 +436,6 @@ ncurses (with wide character support enabled) and gettext are needed if you want
 
 For Homebrew:
 
-    brew tap homebrew/dupes
     brew install gettext ncurses
     brew link --force gettext ncurses
 
@@ -275,6 +448,27 @@ For MacPorts:
     sudo port install gettext ncurses
     hash -r
 
+### gcc
+
+The version of gcc/g++ installed with the [Command Line Tools for Xcode](https://developer.apple.com/downloads/) is actually just a front end for the same Apple LLVM as clang.  This doesn't necessarily cause issues, but this version of gcc/g++ will have clang error messages and essentially produce the same results as if using clang. To compile with the "real" gcc/g++, install it with homebrew:
+
+    brew install gcc
+
+However, homebrew installs gcc as gcc-8 (where 6 is the version) to avoid conflicts. The simplest way to use the homebrew version at `/usr/local/bin/gcc-8` instead of the Apple LLVM version at `/usr/bin/gcc` is to symlink the necessary.
+
+    cd /usr/local/bin
+    ln -s gcc-8 gcc
+    ln -s g++-8 g++
+    ln -s c++-8 c++
+
+Or, to do this for everything in `/usr/local/bin/` ending with `-8`,
+
+    find /usr/local/bin -name "*-8" -exec sh -c 'ln -s "$1" $(echo "$1" | sed "s/..$//")' _ {} \;
+
+Also, you need to make sure that `/usr/local/bin` appears before `/usr/bin` in your `$PATH`, or else this will not work.
+
+Check that `gcc -v` shows the homebrew version you installed.
+
 ### Compiling
 
 The Cataclysm source is compiled using `make`.
@@ -282,7 +476,7 @@ The Cataclysm source is compiled using `make`.
 ### Make options
 
 * `NATIVE=osx` build for OS X. Required for all Mac builds.
-* `OSX_MIN=version` sets `-mmacosx-version-min=` (for OS X > 10.5 set it to 10.6 or higher); omit for 10.5.
+* `OSX_MIN=version` sets `-mmacosx-version-min=` (for OS X > 10.5 set it to 10.6 or higher); omit for 10.5. 10.12 or higher is highly recommended (see ISSUES below).
 * `TILES=1` build the SDL version with graphical tiles (and graphical ASCII); omit to build with `ncurses`.
 * `SOUND=1` - if you want sound; this requires `TILES=1` and the additional dependencies mentioned above.
 * `FRAMEWORK=1` (tiles only) link to SDL libraries under the OS X Frameworks folders; omit to use SDL shared libraries from Homebrew or Macports.
@@ -292,6 +486,7 @@ The Cataclysm source is compiled using `make`.
 * `CLANG=1` build with [Clang](http://clang.llvm.org/), the compiler that's included with the latest Command Line Tools for Xcode; omit to build using gcc/g++.
 * `MACPORTS=1` build against dependencies installed via Macports, currently only `gettext` and `ncurses`.
 * `USE_HOME_DIR=1` places user files (config, saves, graveyard, etc) in the user's home directory. For curses builds, this is `/Users/<user>/.cataclysm-dda`, for SDL builds it is `/Users/<user>/Library/Application Support/Cataclysm`.
+* `DEBUG_SYMBOLS=1` retains debug symbols when building an optimized release binary, making it easy for developers to spot the crash site.
 
 In addition to the options above, there is an `app` make target which will package the tiles build into `Cataclysm.app`, a complete tiles build in a Mac application that can run without Terminal.
 
@@ -301,15 +496,15 @@ For more info, see the comments in the `Makefile`.
 
 Build a release SDL version using Clang without gettext:
 
-    make NATIVE=osx OSX_MIN=10.7 RELEASE=1 TILES=1 LOCALIZE=0 CLANG=1
+    make NATIVE=osx OSX_MIN=10.12 RELEASE=1 TILES=1 LOCALIZE=0 CLANG=1
 
 Build a release SDL version using Clang, link to libraries in the OS X Frameworks folders, don't use `gettext`, and package it into `Cataclysm.app`:
 
-    make app NATIVE=osx OSX_MIN=10.7 RELEASE=1 TILES=1 FRAMEWORK=1 LOCALIZE=0 CLANG=1
+    make app NATIVE=osx OSX_MIN=10.12 RELEASE=1 TILES=1 FRAMEWORK=1 LOCALIZE=0 CLANG=1
 
 Build a release curses version with gettext supplied by Macports:
 
-    make NATIVE=osx OSX_MIN=10.7 RELEASE=1 LOCALIZE=1 MACPORTS=1 CLANG=1
+    make NATIVE=osx OSX_MIN=10.12 RELEASE=1 LOCALIZE=1 MACPORTS=1 CLANG=1
 
 ### Compiling localization files
 
@@ -331,6 +526,12 @@ For SDL:
 
 For `app` builds, launch Cataclysm.app from Finder.
 
+### Test suite
+
+The build will also generate a test executable at tests/cata_test.
+Invoke it as you would any other executable and it will run the full suite of tests.
+Pass the ``--help`` flag to list options.
+
 ### dmg distribution
 
 You can build a nice dmg distribution file with the `dmgdist` target. You will need a tool called [dmgbuild](https://pypi.python.org/pypi/dmgbuild). To install this tool, you will need Python first. If you are on Mac OS X >= 10.8, Python 2.7 is pre-installed with the OS. If you are on an older version of OS X, you can download Python [on their official website](https://www.python.org/downloads/) or install it with homebrew `brew install python`. Once you have Python, you should be able to install `dmgbuild` by running:
@@ -342,11 +543,17 @@ You can build a nice dmg distribution file with the `dmgdist` target. You will n
 
 Once `dmgbuild` is installed, you will be able to use the `dmgdist` target like this. The use of `USE_HOME_DIR=1` is important here because it will allow for an easy upgrade of the game while keeping the user config and his saves in his home directory.
 
-    make dmgdist NATIVE=osx OSX_MIN=10.7 RELEASE=1 TILES=1 FRAMEWORK=1 LOCALIZE=0 CLANG=1 USE_HOME_DIR=1
+    make dmgdist NATIVE=osx OSX_MIN=10.12 RELEASE=1 TILES=1 FRAMEWORK=1 LOCALIZE=0 CLANG=1 USE_HOME_DIR=1
 
 You should see a `Cataclysm.dmg` file.
 
 ## Troubleshooting
+
+### ISSUE: Game runs very slowly when built for Mac OS X 10.11 or earlier
+
+For versions of OS X 10.11 and earlier, run-time optimizations are disabled for native builds (`-O0` is specified as a compilation flag) due to errors that can occur in compilation. See [Pull Request #26564](https://github.com/CleverRaven/Cataclysm-DDA/pull/26564) for details.
+
+If you're on a newer version of OS X, please use an appropriate value for the `OSX_MIN=` option, i.e. `OSX_MIN=10.14` if you are on Mojave.
 
 ### ISSUE: crash on startup due to libint.8.dylib aborting
 
@@ -365,137 +572,23 @@ Open Terminal's preferences, turn on "Use bright colors for bold text" in "Prefe
 
 # Windows
 
-## MinGW Guide
-To compile under windows MinGW you first need to download mingw. An automated GUI installer assistant called mingw-get-setup.exe will make everything a lot easier. I recommend installing it to `C:\MinGW`
-https://sourceforge.net/projects/mingw/files/latest/download
+## Building with Visual Studio
 
-### MinGW setup
-once installed we need to get the right packages. In "Basic Setup", mark `mingw-developer-toolkit`, `mingw32-base` and `mingw32-gcc-g++`
+See [COMPILING-VS-VCPKG.md](https://github.com/CleverRaven/Cataclysm-DDA/blob/master/COMPILING-VS-VCPKG.md) for instructions on how to set up and use a build environment using Visual Studio on windows.
 
-Then install these components using `Installation -> Apply Changes`.
+This is probably the easiest solution for someone used to working with Visual Studio and similar IDEs.
 
-#### Localization
-If we want to compile with localization, we will need gettext and libintl. In "All Packages -> MinGW -> MinGW Autotools" ensure that `mingw32-gettext` and `mingw32-libintl` are installed.
+## Building with MSYS2
 
-### Required Tiles(SDL) Libraries
-If we want to compile with Tiles (SDL) we have to download a few libraries.
-* `SDL2` http://www.libsdl.org/download-2.0.php chose `SDL2-devel-2.0.X-mingw.tar.gz`.
-* `SDL_ttf` https://www.libsdl.org/projects/SDL_ttf/ chose `SDL2_ttf-devel-2.0.12-mingw.tar.gz`.
-* `SDL_image` https://www.libsdl.org/projects/SDL_image/ chose ` SDL2_image-devel-2.0.0-mingw.tar.gz` 
-* `freetype` http://gnuwin32.sourceforge.net/packages/freetype.htm chose `Binaries` and `Developer files`  
+See [COMPILING-MSYS.md](https://github.com/CleverRaven/Cataclysm-DDA/blob/master/COMPILING-MSYS.md) for instructions on how to set up and use a build environment using MSYS2 on windows.
 
-#### Bundled Libraries
-The following archives were pre-bundled for convienience and reduction of head-aches, simply download and extract directly to the root directory of the CDDA source:
-* `64-bit SDL \ Tiles \ Sound \ Lua \ Localization` http://dev.narc.ro/cataclysm/cdda-win64-codeblocks.7z
+MSYS2 strikes a balance between a native Windows application and a UNIX-like environment. There's some command-line tools that our project uses (notably our JSON linter) that are harder to use without a command-line environment such as what MSYS2 or CYGWIN provide.
 
-#### Installing Tiles(SDL) libraries.
-For the first 3 (`SDL2`, `SDL_ttf` and `SDL_image`) you want to extract the include and lib folders from the `i686-w64-mingw32` folders into your MinGW installtion folder. (Reccomended `C:\MinGW`). And the `SDL2_image.dll` and `SDL2_ttf.dll` into your cataclysm root folder.
+## Building with CYGWIN
 
-For freetype you want to grab the include and lib folders from the `freetype-2.X.X-X-lib.zip` and move them into your your MinGW installation folder. Then you want to get the freetype6.dll from the `freetype-2.X.X-X-bin.zip` and move it into your cataclysm root folder.
+See [COMPILING-CYGWIN.md](https://github.com/CleverRaven/Cataclysm-DDA/blob/master/COMPILING-CYGWIN.md) for instructions on how to set up and use a build environment using CYGWIN on windows.
 
-#### ISSUE - "winapifamily.h" no such file or directoyr
-There seems to be at the moment of writing that a file in SDL is broken and needs to be replaced. 
-https://hg.libsdl.org/SDL/raw-file/e217ed463f25/include/SDL_platform.h 
-Replace SDL_platform.h in the MinGW/include/SDL2 folder and it should be fine.
-
-### Makefile changes
-This probably not the best way to do it. But it seems that you need to remove a few dependenceis from the makefile or it will not build.
-change the line `LDFLAGS += -lfreetype -lpng -lz -ljpeg -lbz2` to `LDFLAGS += -lfreetype`
-
-### Compiling
-Navigate to `MinGW\msys\1.0` and run `msys.bat`. This will start a cmd-like shell where the following entries will be made.
-
-Add the MinGW toolchain to your PATH with `export PATH=$PATH:/c/MinGW/bin`. Replace /c/MinGW/ with the directory into which you installed MinGW (/c/ stands for drive C:, so if it's in F:/foo/bar, you'd use /f/foo/bar).
-
-Navigate to the CDDA source code directory.
-
-Compile using `make TILES=1 NATIVE=win32 LOCALIZE=1` and unless there are problems, it should produce a CDDA binary for you.
-
-If you dont want tiles you can change `TILES` to 0.
-
-If you dont want localization you can change `LOCALIZE` to 0.
-
-## Rough guide to building with only MSYS2
-
-This is a tentative step-by-step guide to building your own CDDA with Tiles, Localization and Lua using only MSYS2. You may want to follow it if the MinGW guide above doesn't work for you or you just feel adventurous. Feedback is very much welcome in terms of issues and/or pull-requests.
-
-This guide assumes you're building on a x86_64 build of Windows. If not adjust the invocations appropriately. It has been tested and proven to work on Windows XP, Windows 7 and Windows 10. Your mileage may vary.
-
-#### 1. Go to https://msys2.github.io/ and download appropriate MSYS (top of the page).
-
-#### 2. Install MSYS2 and leave the Run ticker on. You should end up with a MSYS2 terminal.
-
-#### 3. In the open terminal:
-
-```bash
-pacman --needed -Sy bash pacman pacman-mirrors msys2-runtime
-```
-
-Note: You may close the terminal now and reopen it from the Start menu (MSYS2 Shell, just to be on the safe-er side).
-
-Note: You may need to bash the close button repeatedly. Or use the task manager to kill it.
-
-#### 4. Open an editor that preserves line-endings
-
-Note: Wordpad should do. Or Notepadd++.
-
-#### 5. Open `C:\msys64\etc\pacman.conf` and change:
-
-```bash
-# By default, pacman accepts packages signed by keys that its local keyring
-# trusts (see pacman-key and its man page), as well as unsigned packages.
-#SigLevel = Never
-SigLevel    = Required DatabaseOptional
-LocalFileSigLevel = Optional
-#RemoteFileSigLevel = Required
-```
-
-To:
-
-```bash
-# By default, pacman accepts packages signed by keys that its local keyring
-# trusts (see pacman-key and its man page), as well as unsigned packages.
-SigLevel = Never
-#SigLevel    = Required DatabaseOptional
-LocalFileSigLevel = Optional
-#RemoteFileSigLevel = Required
-```
-
-(Exchange the # on SigLevel). This disables signature checking as it is currently borked.
-
-#### 6. Save the file
-
-#### 7. Run in MSYS2 terminal:
-
-```bash
-update-core
-pacman -Su
-pacman -S mingw-w64-x86_64-gcc
-pacman -S mingw-w64-x86_64-SDL2 mingw-w64-x86_64-SDL2_image mingw-w64-x86_64-SDL2_mixer mingw-w64-x86_64-SDL2_ttf
-pacman -S mingw-w64-x86_64-ncurses
-pacman -S mingw-w64-x86_64-pkg-config mingw-w64-x86_64-libwebp
-pacman -S git make
-pacman -S mingw-w64-x86_64-lua
-```
-
-#### 8. Close MSYS2 terminal and open MinGW-w64 Win64 Shell from Start menu and run:
-
-Note: This will download whole CDDA repository. If you're just testing you should probably add `--depth=1`.
-
-```bash
-git clone https://github.com/CleverRaven/Cataclysm-DDA.git
-cd Cataclysm-DDA
-```
-
-#### 9. Compile your CDDA by running:
-
-```bash
-make MSYS2=1 RELEASE=1 TILES=1 LOCALIZE=1 SOUND=1 LUA=1 NATIVE=win64
-```
-
-Note: You cannot naively use `-jX` to speed up your building process with `LUA=1`. You must first run `cd src/lua/ && lua generate_bindings.lua && cd ../..` if you want to use `-jX`. X should be the number of threads/cores your processor has.
-
-That's it. You should get a `cataclysm-tiles.exe` binary in the same folder you've found the `Makefile` in. The make flags are the same as the ones described above. For instance, if you do not want to build with sound support, you can remove `SOUND=1`.
+CYGWIN attempts to more fully emulate a POSIX environment, to be "more unix" than MSYS2. It is a little less modern in some respects, and lacks the convenience of the MSYS2 package manager.
 
 # BSDs
 
@@ -503,7 +596,7 @@ There are reports of CDDA building fine on recent OpenBSD and FreeBSD machines (
 
 ### Building on FreeBSD/amd64 10.1 with the system compiler
 
-FreeBSD uses clang as the default compiler as of 10.0, and combines it with libc++ to provide C++11 support out of the box. You will however need gmake (examples for binary packages):
+FreeBSD uses clang as the default compiler as of 10.0, and combines it with libc++ to provide C++14 support out of the box. You will however need gmake (examples for binary packages):
 
 `pkg install gmake`
 

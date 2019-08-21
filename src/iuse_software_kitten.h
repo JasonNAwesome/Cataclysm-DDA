@@ -1,23 +1,19 @@
+#pragma once
 #ifndef SOFTWARE_KITTEN_H
 #define SOFTWARE_KITTEN_H
 
-#include "cursesdef.h"
-#include "color.h"
-
 #include <string>
-#include <cassert>
-#include <cmath>
-#include <cstdio>
-#include <cstdlib>
-#include <cstring>
-#include <iosfwd>
-#include <iterator>
-#include <map>
-#include <vector>
+
+#include "color.h"
+#include "point.h"
+
+namespace catacurses
+{
+class window;
+} // namespace catacurses
 
 struct kobject {
-    int x;
-    int y;
+    point pos;
     nc_color color;
     int character;
 };
@@ -29,20 +25,20 @@ class robot_finds_kitten
     public:
         bool ret;
         std::string getmessage( int idx );
-        robot_finds_kitten( WINDOW *w );
-        void instructions( WINDOW *w );
-        void draw_robot( WINDOW *w );
-        void draw_kitten( WINDOW *w );
-        void process_input( int input, WINDOW *w );
+        robot_finds_kitten( const catacurses::window &w );
+        void instructions( const catacurses::window &w );
+        void draw_robot( const catacurses::window &w );
+        void draw_kitten( const catacurses::window &w );
+        void process_input( int input, const catacurses::window &w );
         kobject robot;
         kobject kitten;
         kobject empty;
         kobject bogus[MAXMESSAGES];
-        int rfkscreen[60][20];
+        static constexpr int rfkLINES = 20;
+        static constexpr int rfkCOLS = 60;
+        int rfkscreen[rfkCOLS][rfkLINES];
         int nummessages;
         int bogus_messages[MAXMESSAGES];
-        int rfkLINES;
-        int rfkCOLS;
 };
 
 #endif

@@ -1,11 +1,13 @@
+#pragma once
 #ifndef WEIGHTED_LIST_H
 #define WEIGHTED_LIST_H
 
 #include "rng.h"
-#include <vector>
-#include <functional>
+
+#include <climits>
 #include <cstdlib>
-#include <cmath>
+#include <functional>
+#include <vector>
 
 template <typename W, typename T> struct weighted_object {
     weighted_object( const T &obj, const W &weight ) : obj( obj ), weight( weight ) {}
@@ -15,7 +17,9 @@ template <typename W, typename T> struct weighted_object {
 };
 
 template <typename W, typename T> struct weighted_list {
-        weighted_list() : total_weight( 0 ) { };
+        weighted_list() : total_weight( 0 ) { }
+
+        virtual ~weighted_list() = default;
 
         /**
          * This will add a new object to the weighted list. Returns a pointer to
@@ -30,7 +34,7 @@ template <typename W, typename T> struct weighted_list {
                 invalidate_precalc();
                 return &( objects[objects.size() - 1].obj );
             }
-            return NULL;
+            return nullptr;
         }
 
         /**
@@ -55,7 +59,7 @@ template <typename W, typename T> struct weighted_list {
                 // if not found, add to end of list
                 return add( obj, weight );
             }
-            return NULL;
+            return nullptr;
         }
 
         /**
@@ -88,11 +92,11 @@ template <typename W, typename T> struct weighted_list {
             if( total_weight > 0 ) {
                 return &( objects[pick_ent( randi )].obj );
             } else {
-                return NULL;
+                return nullptr;
             }
         }
         const T *pick() const {
-            return pick( rand() );
+            return pick( rng_bits() );
         }
 
         /**
@@ -105,11 +109,11 @@ template <typename W, typename T> struct weighted_list {
             if( total_weight > 0 ) {
                 return &( objects[pick_ent( randi )].obj );
             } else {
-                return NULL;
+                return nullptr;
             }
         }
         T *pick() {
-            return pick( rand() );
+            return pick( rng_bits() );
         }
 
         /**
@@ -147,12 +151,18 @@ template <typename W, typename T> struct weighted_list {
         typename std::vector<weighted_object<W, T> >::iterator end() {
             return objects.end();
         }
+        typename std::vector<weighted_object<W, T> >::const_iterator begin() const {
+            return objects.begin();
+        }
+        typename std::vector<weighted_object<W, T> >::const_iterator end() const {
+            return objects.end();
+        }
         typename std::vector<weighted_object<W, T> >::iterator erase(
             typename std::vector<weighted_object<W, T> >::iterator first,
             typename std::vector<weighted_object<W, T> >::iterator last ) {
             invalidate_precalc();
             return objects.erase( first, last );
-        };
+        }
         size_t size() const noexcept {
             return objects.size();
         }
@@ -176,9 +186,8 @@ template <typename T> struct weighted_int_list : public weighted_list<int, T> {
         void precalc() {
             precalc_array.clear();
             precalc_array.reserve( this->total_weight ); // to avoid additional reallocations
-            size_t i;
             // weights [3,1,5] will produce vector of indices [0,0,0,1,2,2,2,2,2]
-            for( i = 0; i < this->objects.size(); i++ ) {
+            for( size_t i = 0; i < this->objects.size(); i++ ) {
                 precalc_array.resize( precalc_array.size() + this->objects[i].weight, i );
             }
         }
@@ -190,8 +199,8 @@ template <typename T> struct weighted_int_list : public weighted_list<int, T> {
                 return 0;
             }
             size_t i;
-            int picked = ( randi % ( this->total_weight ) ) + 1;
-            if( precalc_array.size() ) {
+            const int picked = ( randi % ( this->total_weight ) ) + 1;
+            if( !precalc_array.empty() ) {
                 // if the precalc_array is populated, use it for O(1) lookup
                 i = precalc_array[picked - 1];
             } else {
@@ -216,12 +225,12 @@ template <typename T> struct weighted_int_list : public weighted_list<int, T> {
 
 template <typename T> struct weighted_float_list : public weighted_list<double, T> {
 
-        //TODO precalc using alias method
+        // TODO: precalc using alias method
 
     protected:
 
         size_t pick_ent( unsigned int randi ) const override {
-            double picked = ( double )( randi % RAND_MAX ) / ( double )RAND_MAX * ( this->total_weight );
+            const double picked = static_cast<double>( randi ) / UINT_MAX * this->total_weight;
             double accumulated_weight = 0;
             size_t i;
             for( i = 0; i < this->objects.size(); i++ ) {
@@ -234,6 +243,5 @@ template <typename T> struct weighted_float_list : public weighted_list<double, 
         }
 
 };
-
 
 #endif

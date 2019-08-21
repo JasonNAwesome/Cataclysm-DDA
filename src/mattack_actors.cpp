@@ -1,24 +1,41 @@
-#include <vector>
+#include "mattack_actors.h"
 
+#include <algorithm>
+#include <memory>
+
+#include "avatar.h"
 #include "game.h"
+#include "generic_factory.h"
+#include "gun_mode.h"
+#include "line.h"
 #include "map.h"
 #include "map_iterator.h"
-#include "monster.h"
-#include "mattack_actors.h"
 #include "messages.h"
-#include "translations.h"
-#include "sounds.h"
+#include "monster.h"
 #include "npc.h"
-#include "debug.h"
+#include "sounds.h"
+#include "translations.h"
+#include "calendar.h"
+#include "creature.h"
+#include "enums.h"
+#include "item.h"
+#include "json.h"
+#include "player.h"
+#include "rng.h"
+#include "material.h"
+#include "point.h"
 
+const efftype_id effect_grabbed( "grabbed" );
 const efftype_id effect_bite( "bite" );
 const efftype_id effect_infected( "infected" );
 const efftype_id effect_laserlocked( "laserlocked" );
 const efftype_id effect_was_laserlocked( "was_laserlocked" );
 const efftype_id effect_targeted( "targeted" );
+const efftype_id effect_poison( "poison" );
+const efftype_id effect_badpoison( "badpoison" );
 
 // Simplified version of the function in monattack.cpp
-bool is_adjacent( const monster &z, const Creature &target )
+static bool is_adjacent( const monster &z, const Creature &target )
 {
     if( rl_dist( z.pos(), target.pos() ) != 1 ) {
         return false;
@@ -27,25 +44,13 @@ bool is_adjacent( const monster &z, const Creature &target )
     return z.posz() == target.posz();
 }
 
-// Modified version of the function on monattack.cpp
-bool dodge_check( int max_accuracy, Creature &target )
-{
-    ///\EFFECT_DODGE increases chance of dodging special attacks of monsters
-    int dodge = std::max( target.get_dodge() - rng( 0, max_accuracy ), 0L );
-    if( rng( 0, 10000 ) < 10000 / ( 1 + ( 99 * exp( -0.6f * dodge ) ) ) ) {
-        return true;
-    }
-
-    return false;
-}
-
-void leap_actor::load( JsonObject &obj )
+void leap_actor::load_internal( JsonObject &obj, const std::string & )
 {
     // Mandatory:
     max_range = obj.get_float( "max_range" );
     // Optional:
     min_range = obj.get_float( "min_range", 1.0f );
-    allow_no_target = obj.get_bool( "allow_no_target", true );
+    allow_no_target = obj.get_bool( "allow_no_target", false );
     move_cost = obj.get_int( "move_cost", 150 );
     min_consider_range = obj.get_float( "min_consider_range", 0.0f );
     max_consider_range = obj.get_float( "max_consider_range", 200.0f );
@@ -58,39 +63,49 @@ mattack_actor *leap_actor::clone() const
 
 bool leap_actor::call( monster &z ) const
 {
-    if( !z.can_act() ) {
+    if( !z.can_act() || !z.move_effects( false ) ) {
         return false;
     }
 
     std::vector<tripoint> options;
     tripoint target = z.move_target();
-    float best_float = trig_dist( z.pos(), target );
+    float best_float = trigdist ? trig_dist( z.pos(), target ) : square_dist( z.pos(), target );
     if( best_float < min_consider_range || best_float > max_consider_range ) {
         return false;
     }
 
     // We wanted the float for range check
     // int here will make the jumps more random
-    int best = ( int )best_float;
+    int best = std::numeric_limits<int>::max();
     if( !allow_no_target && z.attack_target() == nullptr ) {
         return false;
     }
-
-    for( const tripoint &dest : g->m.points_in_radius( z.pos(), max_range ) ) {
-        if( dest == z.pos() ) {
+    std::multimap<int, tripoint> candidates;
+    for( const tripoint &candidate : g->m.points_in_radius( z.pos(), max_range ) ) {
+        if( candidate == z.pos() ) {
             continue;
+        }
+        float leap_dist = trigdist ? trig_dist( z.pos(), candidate ) :
+                          square_dist( z.pos(), candidate );
+        if( leap_dist > max_range || leap_dist < min_range ) {
+            continue;
+        }
+        int candidate_dist = rl_dist( candidate, target );
+        if( candidate_dist >= best_float ) {
+            continue;
+        }
+        candidates.emplace( candidate_dist, candidate );
+    }
+    for( const auto &candidate : candidates ) {
+        const int &cur_dist = candidate.first;
+        const tripoint &dest = candidate.second;
+        if( cur_dist > best ) {
+            break;
         }
         if( !z.sees( dest ) ) {
             continue;
         }
         if( !g->is_empty( dest ) ) {
-            continue;
-        }
-        int cur_dist = rl_dist( target, dest );
-        if( cur_dist > best ) {
-            continue;
-        }
-        if( trig_dist( z.pos(), dest ) < min_range ) {
             continue;
         }
         bool blocked_path = false;
@@ -104,11 +119,6 @@ bool leap_actor::call( monster &z ) const
         }
         if( blocked_path ) {
             continue;
-        }
-
-        if( cur_dist < best ) {
-            // Better than any earlier one
-            options.clear();
         }
 
         options.push_back( dest );
@@ -125,13 +135,61 @@ bool leap_actor::call( monster &z ) const
     z.setpos( chosen );
     seen |= g->u.sees( z ); // ... or we can see them land
     if( seen ) {
-        add_msg( _( "The %s leaps!" ), z.name().c_str() );
+        add_msg( _( "The %s leaps!" ), z.name() );
     }
 
     return true;
 }
 
-bite_actor::bite_actor()
+mattack_actor *mon_spellcasting_actor::clone() const
+{
+    return new mon_spellcasting_actor( *this );
+}
+
+void mon_spellcasting_actor::load_internal( JsonObject &obj, const std::string & )
+{
+    std::string sp_id;
+    int spell_level = 0;
+    mandatory( obj, was_loaded, "spell_id", sp_id );
+    optional( obj, was_loaded, "self", self, false );
+    optional( obj, was_loaded, "spell_level", spell_level, 0 );
+    spell_data = spell( spell_id( sp_id ) );
+    for( int i = 0; i <= spell_level; i++ ) {
+        spell_data.gain_level();
+    }
+    avatar fake_player;
+    move_cost = spell_data.casting_time( fake_player );
+}
+
+bool mon_spellcasting_actor::call( monster &mon ) const
+{
+    if( !mon.can_act() ) {
+        return false;
+    }
+
+    if( !mon.attack_target() ) {
+        // this is an attack. there is no reason to attack if there isn't a real target.
+        return false;
+    }
+
+    const tripoint target = mon.attack_target()->pos();
+
+    std::string fx = spell_data.effect();
+    // is the spell an attack that needs to hit the target?
+    // examples of spells that don't: summons, teleport self
+    const bool targeted_attack = fx == "target_attack" || fx == "projectile_attack" ||
+                                 fx == "cone_attack" || fx == "line_attack";
+
+    if( targeted_attack && rl_dist( mon.pos(), target ) > spell_data.range() ) {
+        return false;
+    }
+
+    spell_data.cast_all_effects( mon, target );
+
+    return true;
+}
+
+melee_actor::melee_actor()
 {
     damage_max_instance = damage_instance::physical( 9, 0, 0, 0 );
     min_mul = 0.5f;
@@ -139,7 +197,7 @@ bite_actor::bite_actor()
     move_cost = 100;
 }
 
-void bite_actor::load( JsonObject &obj )
+void melee_actor::load_internal( JsonObject &obj, const std::string & )
 {
     // Optional:
     if( obj.has_array( "damage_max_instance" ) ) {
@@ -153,80 +211,153 @@ void bite_actor::load( JsonObject &obj )
     max_mul = obj.get_float( "max_mul", 1.0f );
     move_cost = obj.get_int( "move_cost", 100 );
     accuracy = obj.get_int( "accuracy", INT_MIN );
-    no_infection_chance = obj.get_int( "no_infection_chance", 14 );
+
+    optional( obj, was_loaded, "miss_msg_u", miss_msg_u,
+              translation( "The %s lunges at you, but you dodge!" ) );
+    optional( obj, was_loaded, "no_dmg_msg_u", no_dmg_msg_u,
+              translation( "The %1$s bites your %2$s, but fails to penetrate armor!" ) );
+    optional( obj, was_loaded, "hit_dmg_u", hit_dmg_u,
+              translation( "The %1$s bites your %2$s!" ) );
+    optional( obj, was_loaded, "miss_msg_npc", miss_msg_npc,
+              translation( "The %s lunges at <npcname>, but they dodge!" ) );
+    optional( obj, was_loaded, "no_dmg_msg_npc", no_dmg_msg_npc,
+              translation( "The %1$s bites <npcname>'s %2$s, but fails to penetrate armor!" ) );
+    optional( obj, was_loaded, "hit_dmg_npc", hit_dmg_npc,
+              translation( "The %1$s bites <npcname>'s %2$s!" ) );
+
+    if( obj.has_array( "body_parts" ) ) {
+        JsonArray jarr = obj.get_array( "body_parts" );
+        while( jarr.has_more() ) {
+            JsonArray sub = jarr.next_array();
+            const body_part bp = get_body_part_token( sub.get_string( 0 ) );
+            const float prob = sub.get_float( 1 );
+            body_parts.add_or_replace( bp, prob );
+        }
+    }
+
+    if( obj.has_array( "effects" ) ) {
+        JsonArray jarr = obj.get_array( "effects" );
+        while( jarr.has_more() ) {
+            JsonObject eff = jarr.next_object();
+            effects.push_back( load_mon_effect_data( eff ) );
+        }
+    }
 }
 
-bool bite_actor::call( monster &z ) const
+Creature *melee_actor::find_target( monster &z ) const
 {
     if( !z.can_act() ) {
-        return false;
+        return nullptr;
     }
 
     Creature *target = z.attack_target();
     if( target == nullptr || !is_adjacent( z, *target ) ) {
+        return nullptr;
+    }
+
+    return target;
+}
+
+bool melee_actor::call( monster &z ) const
+{
+    Creature *target = find_target( z );
+    if( target == nullptr ) {
         return false;
     }
 
     z.mod_moves( -move_cost );
 
-    add_msg( m_debug, "%s attempting to bite %s", z.name().c_str(), target->disp_name().c_str() );
+    add_msg( m_debug, "%s attempting to melee_attack %s", z.name(),
+             target->disp_name() );
 
-    int hitspread = target->deal_melee_attack( &z, z.hit_roll() );
+    const int acc = accuracy >= 0 ? accuracy : z.type->melee_skill;
+    int hitspread = target->deal_melee_attack( &z, dice( acc, 10 ) );
 
     if( hitspread < 0 ) {
         auto msg_type = target == &g->u ? m_warning : m_info;
         sfx::play_variant_sound( "mon_bite", "bite_miss", sfx::get_heard_volume( z.pos() ),
                                  sfx::get_heard_angle( z.pos() ) );
-        target->add_msg_player_or_npc( msg_type, _( "The %s lunges at you, but you dodge!" ),
-                                       _( "The %s lunges at <npcname>, but they dodge!" ),
-                                       z.name().c_str() );
+        target->add_msg_player_or_npc( msg_type, miss_msg_u, miss_msg_npc, z.name() );
         return true;
     }
 
     damage_instance damage = damage_max_instance;
-    dealt_damage_instance dealt_damage;
-    body_part hit;
 
     double multiplier = rng_float( min_mul, max_mul );
     damage.mult_damage( multiplier );
 
-    target->deal_melee_hit( &z, hitspread, false, damage, dealt_damage );
+    body_part bp_hit = body_parts.empty() ?
+                       target->select_body_part( &z, hitspread ) :
+                       *body_parts.pick();
 
-    hit = dealt_damage.bp_hit;
+    target->on_hit( &z, bp_hit );
+    dealt_damage_instance dealt_damage = target->deal_damage( &z, bp_hit, damage );
+    dealt_damage.bp_hit = bp_hit;
+
     int damage_total = dealt_damage.total_damage();
-    add_msg( m_debug, "%s's bite did %d damage", z.name().c_str(), damage_total );
+    add_msg( m_debug, "%s's melee_attack did %d damage", z.name(), damage_total );
     if( damage_total > 0 ) {
-        auto msg_type = target == &g->u ? m_bad : m_info;
-        //~ 1$s is monster name, 2$s bodypart in accusative
-        if( target->is_player() ) {
-            sfx::play_variant_sound( "mon_bite", "bite_hit", sfx::get_heard_volume( z.pos() ),
-                                     sfx::get_heard_angle( z.pos() ) );
-            sfx::do_player_death_hurt( *dynamic_cast<player *>( target ), 0 );
-        }
-        target->add_msg_player_or_npc( msg_type,
-                                       _( "The %1$s bites your %2$s!" ),
-                                       _( "The %1$s bites <npcname>'s %2$s!" ),
-                                       z.name().c_str(),
-                                       body_part_name_accusative( hit ).c_str() );
-        if( one_in( no_infection_chance - damage_total ) ) {
-            if( target->has_effect( effect_bite, hit ) ) {
-                target->add_effect( effect_bite, 400, hit, true );
-            } else if( target->has_effect( effect_infected, hit ) ) {
-                target->add_effect( effect_infected, 250, hit, true );
-            } else {
-                target->add_effect( effect_bite, 1, hit, true );
-            }
-        }
+        on_damage( z, *target, dealt_damage );
     } else {
         sfx::play_variant_sound( "mon_bite", "bite_miss", sfx::get_heard_volume( z.pos() ),
                                  sfx::get_heard_angle( z.pos() ) );
-        target->add_msg_player_or_npc( _( "The %1$s bites your %2$s, but fails to penetrate armor!" ),
-                                       _( "The %1$s bites <npcname>'s %2$s, but fails to penetrate armor!" ),
-                                       z.name().c_str(),
-                                       body_part_name_accusative( hit ).c_str() );
+        target->add_msg_player_or_npc( m_neutral, no_dmg_msg_u, no_dmg_msg_npc, z.name(),
+                                       body_part_name_accusative( bp_hit ) );
     }
 
     return true;
+}
+
+void melee_actor::on_damage( monster &z, Creature &target, dealt_damage_instance &dealt ) const
+{
+    if( target.is_player() ) {
+        sfx::play_variant_sound( "mon_bite", "bite_hit", sfx::get_heard_volume( z.pos() ),
+                                 sfx::get_heard_angle( z.pos() ) );
+        sfx::do_player_death_hurt( dynamic_cast<player &>( target ), false );
+    }
+    auto msg_type = target.attitude_to( g->u ) == Creature::A_FRIENDLY ? m_bad : m_neutral;
+    const body_part bp = dealt.bp_hit;
+    target.add_msg_player_or_npc( msg_type, hit_dmg_u, hit_dmg_npc, z.name(),
+                                  body_part_name_accusative( bp ) );
+
+    for( const auto &eff : effects ) {
+        if( x_in_y( eff.chance, 100 ) ) {
+            const body_part affected_bp = eff.affect_hit_bp ? bp : eff.bp;
+            target.add_effect( eff.id, time_duration::from_turns( eff.duration ), affected_bp, eff.permanent );
+        }
+    }
+}
+
+mattack_actor *melee_actor::clone() const
+{
+    return new melee_actor( *this );
+}
+
+bite_actor::bite_actor() = default;
+
+void bite_actor::load_internal( JsonObject &obj, const std::string &src )
+{
+    melee_actor::load_internal( obj, src );
+    no_infection_chance = obj.get_int( "no_infection_chance", 14 );
+}
+
+void bite_actor::on_damage( monster &z, Creature &target, dealt_damage_instance &dealt ) const
+{
+    melee_actor::on_damage( z, target, dealt );
+    if( target.has_effect( effect_grabbed ) && one_in( no_infection_chance - dealt.total_damage() ) ) {
+        const body_part hit = dealt.bp_hit;
+        if( target.has_effect( effect_bite, hit ) ) {
+            target.add_effect( effect_bite, 40_minutes, hit, true );
+        } else if( target.has_effect( effect_infected, hit ) ) {
+            target.add_effect( effect_infected, 25_minutes, hit, true );
+        } else {
+            target.add_effect( effect_bite, 1_turns, hit, true );
+        }
+    }
+    if( target.has_trait( trait_id( "TOXICFLESH" ) ) ) {
+        z.add_effect( effect_poison, 5_minutes );
+        z.add_effect( effect_badpoison, 5_minutes );
+    }
 }
 
 mattack_actor *bite_actor::clone() const
@@ -234,11 +365,12 @@ mattack_actor *bite_actor::clone() const
     return new bite_actor( *this );
 }
 
-gun_actor::gun_actor()
+gun_actor::gun_actor() : description( _( "The %1$s fires its %2$s!" ) ),
+    targeting_sound( _( "beep-beep-beep!" ) )
 {
 }
 
-void gun_actor::load( JsonObject &obj )
+void gun_actor::load_internal( JsonObject &obj, const std::string & )
 {
     gun_type = obj.get_string( "gun_type" );
 
@@ -257,17 +389,31 @@ void gun_actor::load( JsonObject &obj )
     obj.read( "fake_int", fake_int );
     obj.read( "fake_per", fake_per );
 
-    obj.read( "range", range );
-    obj.read( "burst_limit", burst_limit );
-    obj.read( "range_no_burst", range_no_burst );
+    auto arr = obj.get_array( "ranges" );
+    while( arr.has_more() ) {
+        auto mode = arr.next_array();
+        if( mode.size() < 2 || mode.get_int( 0 ) > mode.get_int( 1 ) ) {
+            obj.throw_error( "incomplete or invalid range specified", "ranges" );
+        }
+        ranges.emplace( std::make_pair<int, int>( mode.get_int( 0 ), mode.get_int( 1 ) ),
+                        gun_mode_id( mode.size() > 2 ? mode.get_string( 2 ) : "" ) );
+    }
 
     obj.read( "max_ammo", max_ammo );
 
     obj.read( "move_cost", move_cost );
 
-    obj.read( "description", description );
-    obj.read( "failure_msg", failure_msg );
-    obj.read( "no_ammo_sound", no_ammo_sound );
+    if( obj.read( "description", description ) ) {
+        description = _( description );
+    }
+    if( obj.read( "failure_msg", failure_msg ) ) {
+        failure_msg = _( failure_msg );
+    }
+    if( obj.read( "no_ammo_sound", no_ammo_sound ) ) {
+        no_ammo_sound = _( no_ammo_sound );
+    } else {
+        no_ammo_sound = _( "Click." );
+    }
 
     obj.read( "targeting_cost", targeting_cost );
 
@@ -278,7 +424,12 @@ void gun_actor::load( JsonObject &obj )
     obj.read( "targeting_timeout", targeting_timeout );
     obj.read( "targeting_timeout_extend", targeting_timeout_extend );
 
-    obj.read( "targeting_sound", targeting_sound );
+    if( obj.read( "targeting_sound", targeting_sound ) ) {
+        targeting_sound = _( targeting_sound );
+    } else {
+        targeting_sound = _( "Beep." );
+    }
+
     obj.read( "targeting_volume", targeting_volume );
 
     obj.get_bool( "laser_lock", laser_lock );
@@ -293,42 +444,48 @@ mattack_actor *gun_actor::clone() const
 
 bool gun_actor::call( monster &z ) const
 {
-    if( z.friendly != 0 ) {
-        // Attacking monsters, not the player!
-        int boo_hoo;
-        Creature *hostile_target = z.auto_find_hostile_target( range, boo_hoo );
-        if( hostile_target == nullptr ) {
-            // Couldn't find any targets!
-            if( boo_hoo > 0 && g->u.sees( z ) ) {
-                // because that stupid oaf was in the way!
+    Creature *target;
+
+    if( z.friendly ) {
+        int max_range = 0;
+        for( const auto &e : ranges ) {
+            max_range = std::max( std::max( max_range, e.first.first ), e.first.second );
+        }
+
+        int hostiles; // hostiles which cannot be engaged without risking friendly fire
+        target = z.auto_find_hostile_target( max_range, hostiles );
+        if( !target ) {
+            if( hostiles > 0 && g->u.sees( z ) ) {
                 add_msg( m_warning, ngettext( "Pointed in your direction, the %s emits an IFF warning beep.",
                                               "Pointed in your direction, the %s emits %d annoyed sounding beeps.",
-                                              boo_hoo ),
-                         z.name().c_str(), boo_hoo );
+                                              hostiles ),
+                         z.name(), hostiles );
             }
             return false;
         }
 
-        shoot( z, *hostile_target );
-        return true;
+    } else {
+        target = z.attack_target();
+        if( !target || !z.sees( *target ) ) {
+            return false;
+        }
     }
 
-    // Not friendly; hence, firing at the player too
-    Creature *target = z.attack_target();
-    if( target == nullptr || rl_dist( z.pos(), target->pos() ) > range ||
-        !z.sees( *target ) ) {
-        return false;
+    int dist = rl_dist( z.pos(), target->pos() );
+    for( const auto &e : ranges ) {
+        if( dist >= e.first.first && dist <= e.first.second ) {
+            shoot( z, *target, e.second );
+            return true;
+        }
     }
-
-    shoot( z, *target );
-    return true;
+    return false;
 }
 
-void gun_actor::shoot( monster &z, Creature &target ) const
+void gun_actor::shoot( monster &z, Creature &target, const gun_mode_id &mode ) const
 {
     if( require_sunlight && !g->is_in_sunlight( z.pos() ) ) {
         if( one_in( 3 ) && g->u.sees( z ) ) {
-            add_msg( _( failure_msg.c_str() ), z.name().c_str() );
+            add_msg( _( failure_msg ), z.name() );
         }
         return;
     }
@@ -342,14 +499,15 @@ void gun_actor::shoot( monster &z, Creature &target ) const
 
     if( not_targeted || not_laser_locked ) {
         if( targeting_volume > 0 && !targeting_sound.empty() ) {
-            sounds::sound( z.pos(), targeting_volume, _( targeting_sound.c_str() ) );
+            sounds::sound( z.pos(), targeting_volume, sounds::sound_t::alarm,
+                           _( targeting_sound ) );
         }
         if( not_targeted ) {
-            z.add_effect( effect_targeted, targeting_timeout );
+            z.add_effect( effect_targeted, time_duration::from_turns( targeting_timeout ) );
         }
         if( not_laser_locked ) {
-            target.add_effect( effect_laserlocked, 5 );
-            target.add_effect( effect_was_laserlocked, 5 );
+            target.add_effect( effect_laserlocked, 5_turns );
+            target.add_effect( effect_was_laserlocked, 5_turns );
             target.add_msg_if_player( m_warning,
                                       _( "You're not sure why you've got a laser dot on you..." ) );
         }
@@ -361,60 +519,45 @@ void gun_actor::shoot( monster &z, Creature &target ) const
     z.moves -= move_cost;
 
     item gun( gun_type );
-    itype_id ammo = ( ammo_type != "NULL" ) ? ammo_type : gun.ammo_default();
+    gun.gun_set_mode( mode );
 
-    if( ammo != "NULL" && z.ammo[ ammo ] < gun.ammo_required() ) {
+    itype_id ammo = ( ammo_type != "null" ) ? ammo_type : gun.ammo_default();
+    if( ammo != "null" ) {
+        gun.ammo_set( ammo, z.ammo[ ammo ] );
+    }
+
+    if( !gun.ammo_sufficient() ) {
         if( !no_ammo_sound.empty() ) {
-            sounds::sound( z.pos(), 10, _( no_ammo_sound.c_str() ) );
+            sounds::sound( z.pos(), 10, sounds::sound_t::combat, _( no_ammo_sound ) );
         }
         return;
     }
 
-    if( ammo != "NULL" ) {
-        gun.ammo_set( ammo, z.ammo[ ammo ] );
-    }
-
-    npc tmp;
-    tmp.name = _( "The " ) + z.name();
+    standard_npc tmp( _( "The " ) + z.name(), {}, 8, fake_str, fake_dex, fake_int, fake_per );
     tmp.set_fake( true );
     tmp.setpos( z.pos() );
-    tmp.str_max = fake_str;
-    tmp.dex_max = fake_dex;
-    tmp.int_max = fake_int;
-    tmp.per_max = fake_per;
-    tmp.str_cur = fake_str;
-    tmp.dex_cur = fake_dex;
-    tmp.int_cur = fake_int;
-    tmp.per_cur = fake_per;
-    tmp.attitude = z.friendly ? NPCATT_DEFEND : NPCATT_KILL;
+    tmp.set_attitude( z.friendly ? NPCATT_FOLLOW : NPCATT_KILL );
+    tmp.recoil = 0; // no need to aim
 
-    if( fake_skills.empty() ) {
-        tmp.skillLevel( skill_id( "gun" ) ).level( 4 );
-        tmp.skillLevel( gun.gun_skill() ).level( 8 );
-    }
     for( const auto &pr : fake_skills ) {
-        tmp.skillLevel( pr.first ).level( pr.second );
+        tmp.set_skill_level( pr.first, pr.second );
     }
 
     tmp.weapon = gun;
-    tmp.worn.push_back( item( "fake_UPS", calendar::turn, 1000 ) );
-
-    const auto distance = rl_dist( z.pos(), target.pos() );
-
-    const int burst = std::min( distance <= range_no_burst ? burst_limit : 1, tmp.weapon.burst_size() );
+    tmp.i_add( item( "UPS_off", calendar::turn, 1000 ) );
 
     if( g->u.sees( z ) ) {
-        add_msg( m_warning, _( description.c_str() ), z.name().c_str(), tmp.weapon.gun_type().c_str() );
+        add_msg( m_warning, _( description ), z.name(), tmp.weapon.tname() );
     }
 
-    z.ammo[ammo] -= tmp.fire_gun( target.pos(), burst );
+    z.ammo[ammo] -= tmp.fire_gun( target.pos(), gun.gun_current_mode().qty );
 
     if( require_targeting ) {
-        z.add_effect( effect_targeted, targeting_timeout_extend );
+        z.add_effect( effect_targeted, time_duration::from_turns( targeting_timeout_extend ) );
     }
 
     if( laser_lock ) {
         // To prevent spamming laser locks when the player can tank that stuff somehow
-        target.add_effect( effect_was_laserlocked, 5 );
+        target.add_effect( effect_was_laserlocked, 5_turns );
     }
 }

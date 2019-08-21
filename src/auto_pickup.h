@@ -1,100 +1,138 @@
+#pragma once
 #ifndef AUTO_PICKUP_H
 #define AUTO_PICKUP_H
 
-#include <unordered_map>
+#include <array>
+#include <iosfwd>
 #include <string>
+#include <unordered_map>
 #include <vector>
-#include <locale>
-#include <algorithm>
-#include "json.h"
 
-class auto_pickup : public JsonSerializer, public JsonDeserializer
+#include "enums.h"
+#include "type_id.h"
+
+class JsonOut;
+class JsonIn;
+class item;
+struct itype;
+
+namespace auto_pickup
 {
-    private:
-        // templated version of my_equal so it could work with both char and wchar_t
-        template<typename charT>
-        struct my_equal {
-            public:
-                my_equal( const std::locale &loc ) : loc_( loc ) {}
 
-                bool operator()( charT ch1, charT ch2 ) {
-                    return std::toupper( ch1, loc_ ) == std::toupper( ch2, loc_ );
-                }
-            private:
-                const std::locale &loc_;
-        };
+/**
+ * The currently-active set of auto-pickup rules, in a form that allows quick
+ * lookup. When this is filled (by @ref auto_pickup::create_rule()), every
+ * item existing in the game that matches a rule (either white- or blacklist)
+ * is added as the key, with RULE_WHITELISTED or RULE_BLACKLISTED as the values.
+ */
+class cache : public std::unordered_map<std::string, rule_state>
+{
+    public:
+        /// Defines whether this cache has been filled.
+        bool ready = false;
 
-        void test_pattern( const int iCurrentPage, const int iCurrentLine );
-        std::string trim_rule( const std::string &sPatternIn );
-        void merge_vector();
-        void save_reset_changes( const bool bReset );
-        bool match( const std::string &sTextIn, const std::string &sPatternIn );
-        std::vector<std::string> &split( const std::string &s, char delim,
-                                         std::vector<std::string> &elems );
-        template<typename charT>
-        int ci_find_substr( const charT &str1, const charT &str2, const std::locale &loc = std::locale() );
+        /// Temporary data used while filling the cache.
+        std::unordered_map<std::string, const itype *> temp_items;
+};
 
-        void load( const bool bCharacter );
-        bool save( const bool bCharacter );
-        bool load_legacy( const bool bCharacter );
+/**
+ * A single entry in the list of auto pickup entries @ref rule_list.
+ * The data contained can be edited by the player and determines what to pick/ignore.
+ */
+class rule
+{
+    public:
+        std::string sRule;
+        bool bActive = false;
+        bool bExclude = false;
 
-        bool bChar;
+        rule() = default;
 
-        enum type {
-            MERGED = 0,
-            GLOBAL,
-            CHARACTER
-        };
+        rule( const std::string &r, const bool a, const bool e ) : sRule( r ), bActive( a ), bExclude( e ) {
+        }
 
-        class cRules
+        void serialize( JsonOut &json ) const;
+        void deserialize( JsonIn &jsin );
+
+        void test_pattern() const;
+};
+
+/**
+ * A list of rules. This is primarily a container with a few convenient functions (like saving/loading).
+ */
+class rule_list : public std::vector<rule>
+{
+    public:
+        void serialize( JsonOut &json ) const;
+        void deserialize( JsonIn &jsin );
+
+        void load_legacy_rules( std::istream &fin );
+
+        void refresh_map_items( cache &map_items ) const;
+
+        void create_rule( cache &map_items, const std::string &to_match );
+        void create_rule( cache &map_items, const item &it );
+};
+
+class user_interface
+{
+    public:
+        class tab
         {
             public:
-                std::string sRule;
-                bool bActive;
-                bool bExclude;
+                std::string title;
+                rule_list new_rules;
+                std::reference_wrapper<rule_list> rules;
 
-                cRules() {
-                    this->sRule = "";
-                    this->bActive = false;
-                    this->bExclude = false;
-                }
-
-                cRules( std::string sRuleIn, bool bActiveIn, bool bExcludeIn ) {
-                    this->sRule = sRuleIn;
-                    this->bActive = bActiveIn;
-                    this->bExclude = bExcludeIn;
-                }
-
-                ~cRules() {};
+                tab( const std::string &t, rule_list &r ) : title( t ), new_rules( r ), rules( r ) { }
         };
 
-        /**
-         * The currently-active set of auto-pickup rules, in a form that allows quick
-         * lookup. When this is filled (by @ref auto_pickup::create_rules()), every
-         * item existing in the game that matches a rule (either white- or blacklist)
-         * is added as the key, with "true" or "false" as the values.
-         */
-        std::unordered_map<std::string, std::string> mapItems;
+        std::string title;
+        std::vector<tab> tabs;
+        bool is_autopickup = false;
 
-        /**
-         * An ugly hackish mess. Contains:
-         * - vRules[0] aka vRules[MERGED]: the current set of rules; used to fill @ref mapItems.
-         *      Filled by a call to @ref auto_pickup::merge_vector()
-         * - vRules[1,2] aka vRules[GLOBAL,CHARACTER]: current rules split into global and
-         *      character-specific. Allows the editor to show one or the other.
-         * - vRules[3,4]: temporary storage, filled before opening the GUI with the current rules
-         *      from [1,2] (to allow cancelling changes).
-         *      See also @ref auto_pickup::save_reset_changes(bool).
-         */
-        std::vector<cRules> vRules[5];
+        void show();
+
+        bool bStuffChanged = false;
+};
+
+class base_settings
+{
+    protected:
+        mutable cache map_items;
+
+        void invalidate();
+
+    private:
+        virtual void refresh_map_items( cache &map_items ) const = 0;
+
+        void recreate() const;
 
     public:
-        bool has_rule( const std::string &sRule );
-        void add_rule( const std::string &sRule );
-        void remove_rule( const std::string &sRule );
-        void create_rules( const std::string &sItemNameIn = "" );
+        virtual ~base_settings() = default;
+        rule_state check_item( const std::string &sItemName ) const;
+};
+
+class player_settings : public base_settings
+{
+    private:
+        void load( bool bCharacter );
+        bool save( bool bCharacter );
+        bool load_legacy( bool bCharacter );
+
+        rule_list global_rules;
+        rule_list character_rules;
+
+        void refresh_map_items( cache &map_items ) const override;
+
+    public:
+        ~player_settings() override = default;
+        void create_rule( const item *it );
+        bool has_rule( const item *it );
+        void add_rule( const item *it );
+        void remove_rule( const item *it );
+
         void clear_character_rules();
-        const std::string &check_item( const std::string &sItemName );
 
         void show();
         bool save_character();
@@ -102,11 +140,30 @@ class auto_pickup : public JsonSerializer, public JsonDeserializer
         void load_character();
         void load_global();
 
-        using JsonSerializer::serialize;
-        void serialize( JsonOut &json ) const override;
-        void deserialize( JsonIn &jsin ) override;
+        bool empty() const;
 };
 
-auto_pickup &get_auto_pickup();
+class npc_settings : public base_settings
+{
+    private:
+        rule_list rules;
+
+        void refresh_map_items( cache &map_items ) const override;
+
+    public:
+        ~npc_settings() override = default;
+        void create_rule( const std::string &to_match );
+
+        void show( const std::string &name );
+
+        void serialize( JsonOut &json ) const;
+        void deserialize( JsonIn &jsin );
+
+        bool empty() const;
+};
+
+} // namespace auto_pickup
+
+auto_pickup::player_settings &get_auto_pickup();
 
 #endif

@@ -1,36 +1,53 @@
+#pragma once
 #ifndef CATACHARSET_H
 #define CATACHARSET_H
 
-#include <stdint.h>
+#include <cstddef>
+#include <cstdint>
 #include <string>
+
 #define ANY_LENGTH 5
+#define NULL_UNICODE 0x0000
+#define PERCENT_SIGN_UNICODE 0x0025
 #define UNKNOWN_UNICODE 0xFFFD
 
-// get a unicode character from a utf8 string
+class utf8_wrapper;
+
+// get a Unicode character from a utf8 string
 uint32_t UTF8_getch( const char **src, int *srclen );
-// from wcwidth.c, return "cell" width of a unicode char
-int mk_wcwidth( uint32_t ucs );
+inline uint32_t UTF8_getch( const std::string &str )
+{
+    const char *utf8str = str.c_str();
+    int len = str.length();
+    return UTF8_getch( &utf8str, &len );
+}
 // convert cursorx value to byte position
-int cursorx_to_position( const char *line, int cursorx, int *prevppos = NULL, int maxlen = -1 );
-//erease for characters insertion
-int erease_utf8_by_cw( char *t, int cw, int len, int maxlen );
-int utf8_width( const char *s, const bool ignore_tags = false );
-int utf8_width( const std::string &str, const bool ignore_tags = false );
+int cursorx_to_position( const char *line, int cursorx, int *prevpos = nullptr, int maxlen = -1 );
+int utf8_width( const char *s, bool ignore_tags = false );
+int utf8_width( const std::string &str, bool ignore_tags = false );
+int utf8_width( const utf8_wrapper &str, bool ignore_tags = false );
 
 /**
  * Center text inside whole line.
- * @param Text to be centered.
- * @param First printable position on line.
- * @param Last printable position on line.
+ * @param text to be centered.
+ * @param start_pos printable position on line.
+ * @param end_pos printable position on line.
  * @return First char position of centered text or start_pos if text is too big.
 */
 int center_text_pos( const char *text, int start_pos, int end_pos );
-std::string utf8_substr( std::string s, int start, int size = -1 );
+int center_text_pos( const std::string &text, int start_pos, int end_pos );
+int center_text_pos( const utf8_wrapper &text, int start_pos, int end_pos );
 std::string utf32_to_utf8( uint32_t ch );
-std::string utf8_truncate( std::string s, size_t length );
+std::string utf8_truncate( const std::string &s, size_t length );
 
-std::string base64_encode( std::string str );
-std::string base64_decode( std::string str );
+std::string base64_encode( const std::string &str );
+std::string base64_decode( const std::string &str );
+
+std::wstring utf8_to_wstr( const std::string &str );
+std::string wstr_to_utf8( const std::wstring &wstr );
+
+std::string native_to_utf8( const std::string &str );
+std::string utf8_to_native( const std::string &str );
 
 /**
  * UTF8-Wrapper over std::string.
@@ -59,7 +76,7 @@ std::string base64_decode( std::string str );
 class utf8_wrapper
 {
     public:
-        utf8_wrapper() : _data(), _length( 0 ), _display_width( 0 ) { }
+        utf8_wrapper() : _length( 0 ), _display_width( 0 ) { }
         utf8_wrapper( const std::string &d );
         utf8_wrapper( const char *d );
 
@@ -73,6 +90,7 @@ class utf8_wrapper
             erase( start, _length - start );
         }
         void append( const utf8_wrapper &other );
+        utf8_wrapper &replace_all( const utf8_wrapper &search, const utf8_wrapper &replace );
         /**
          * Returns a substring based on the display width, not the number of
          * code points (as the other substr function does).
@@ -93,16 +111,17 @@ class utf8_wrapper
         }
 
         utf8_wrapper &operator=( const std::string &d ) {
-            return *this = utf8_wrapper( d );
+            *this = utf8_wrapper( d );
+            return *this;
         }
         const std::string &str() const {
             return _data;
         }
 
-        // Returns unicode character at position start
-        long at( size_t start ) const;
+        // Returns Unicode character at position start
+        uint32_t at( size_t start ) const;
 
-        // Returns number of unicode characters
+        // Returns number of Unicode characters
         size_t size() const {
             return _length;
         }

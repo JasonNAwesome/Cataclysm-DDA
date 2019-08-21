@@ -1,13 +1,21 @@
+#pragma once
 #ifndef ADVANCED_INV_H
 #define ADVANCED_INV_H
 
-#include "output.h"
-#include "enums.h"
-
-#include <string>
+#include <cctype>
+#include <cstddef>
 #include <array>
+#include <functional>
+#include <list>
+#include <map>
+#include <string>
+#include <vector>
 
-class uimenu;
+#include "cursesdef.h"
+#include "point.h"
+#include "units.h"
+
+class uilist;
 class vehicle;
 class item;
 
@@ -39,7 +47,9 @@ enum advanced_inv_sortby {
     SORTBY_VOLUME,
     SORTBY_CHARGES,
     SORTBY_CATEGORY,
-    SORTBY_DAMAGE
+    SORTBY_DAMAGE,
+    SORTBY_AMMO,
+    SORTBY_SPOILAGE
 };
 
 struct sort_case_insensitive_less : public std::binary_function< char, char, bool > {
@@ -47,6 +57,14 @@ struct sort_case_insensitive_less : public std::binary_function< char, char, boo
         return toupper( static_cast< unsigned char >( x ) ) < toupper( static_cast< unsigned char >( y ) );
     }
 };
+
+void advanced_inv();
+
+/**
+ * Cancels ongoing move all action.
+ * TODO: Make this not needed.
+ */
+void cancel_aim_processing();
 
 struct advanced_inv_listitem;
 
@@ -56,8 +74,7 @@ struct advanced_inv_listitem;
 struct advanced_inv_area {
     const aim_location id;
     // Used for the small overview 3x3 grid
-    int hscreenx = 0;
-    int hscreeny = 0;
+    point hscreen = point_zero;
     // relative (to the player) position of the map point
     tripoint off;
     /** Long name, displayed, translated */
@@ -77,21 +94,22 @@ struct advanced_inv_area {
     // flags, e.g. FIRE, TRAP, WATER
     std::string flags;
     // total volume and weight of items currently there
-    int volume, weight;
+    units::volume volume;
+    units::mass weight;
     // maximal count / volume of items there.
-    int max_size, max_volume;
+    int max_size;
 
     advanced_inv_area( aim_location id ) : id( id ) {}
-    advanced_inv_area( aim_location id, int hscreenx, int hscreeny, tripoint off, std::string name,
-                       std::string shortname ) : id( id ), hscreenx( hscreenx ),
-        hscreeny( hscreeny ), off( off ), name( name ), shortname( shortname ), pos( 0, 0, 0 ),
-        canputitemsloc( false ), veh( nullptr ), vstor( -1 ), volume( 0 ), weight( 0 ),
-        max_size( 0 ), max_volume( 0 ) {
+    advanced_inv_area( aim_location id, int hscreenx, int hscreeny, tripoint off,
+                       const std::string &name, const std::string &shortname ) : id( id ),
+        hscreen( hscreenx, hscreeny ), off( off ), name( name ), shortname( shortname ),
+        canputitemsloc( false ), veh( nullptr ), vstor( -1 ), volume( 0_ml ),
+        weight( 0_gram ), max_size( 0 ) {
     }
 
     void init();
     // if you want vehicle cargo, specify so via `in_vehicle'
-    int free_volume( bool in_vehicle = false ) const;
+    units::volume free_volume( bool in_vehicle = false ) const;
     int get_item_count() const;
     // Other area is actually the same item source, e.g. dragged vehicle to the south and AIM_SOUTH
     bool is_same( const advanced_inv_area &other ) const;
@@ -108,13 +126,12 @@ struct advanced_inv_area {
         if( id > AIM_DRAGGED || id < AIM_SOUTHWEST ) {
             return false;
         }
-        return ( veh != nullptr && vstor >= 0 );
+        return veh != nullptr && vstor >= 0;
     }
 };
 
 // see item_factory.h
 class item_category;
-
 
 /**
  * Entry that is displayed in a adv. inv. pane. It can either contain a
@@ -122,9 +139,9 @@ class item_category;
  * Most members are used only for sorting.
  */
 struct advanced_inv_listitem {
-    typedef std::string itype_id;
+    using itype_id = std::string;
     /**
-     * Index of the item in the original storage container (or inventory).
+     * Index of the item in the itemstack.
      */
     int idx;
     /**
@@ -155,11 +172,11 @@ struct advanced_inv_listitem {
     /**
      * The volume of all the items in this stack, used for sorting.
      */
-    int volume;
+    units::volume volume;
     /**
      * The weight of all the items in this stack, used for sorting.
      */
-    int weight;
+    units::mass weight;
     /**
      * The item category, or the category header.
      */
@@ -173,9 +190,8 @@ struct advanced_inv_listitem {
      * to an item, only @ref cat is valid.
      */
     bool is_category_header() const;
-    /**
-     * Whether this is an item entry (where @ref it is a valid pointer).
-     */
+
+    /** Returns true if this is an item entry */
     bool is_item_entry() const;
     /**
      * Create a category header entry.
@@ -188,22 +204,22 @@ struct advanced_inv_listitem {
     advanced_inv_listitem();
     /**
      * Create a normal item entry.
-     * @param an_item The item pointer, stored in @ref it. Must not be null.
-     * @param index The index, stored in @ref idx.
-     * @param count The stack size, stored in @ref stacks.
-     * @param area The source area, stored in @ref area. Must not be AIM_ALL.
+     * @param an_item The item pointer. Must not be null.
+     * @param index The index
+     * @param count The stack size
+     * @param area The source area. Must not be AIM_ALL.
      * @param from_vehicle Is the item from a vehicle cargo space?
      */
     advanced_inv_listitem( item *an_item, int index, int count,
                            aim_location area, bool from_vehicle );
     /**
      * Create a normal item entry.
-     * @param items The list of item pointers, stored in @ref it.
-     * @param index The index, stored in @ref idx.
-     * @param area The source area, stored in @ref area. Must not be AIM_ALL.
+     * @param list The list of item pointers.
+     * @param index The index
+     * @param area The source area. Must not be AIM_ALL.
      * @param from_vehicle Is the item from a vehicle cargo space?
      */
-    advanced_inv_listitem( const std::list<item *> &items, int index,
+    advanced_inv_listitem( const std::list<item *> &list, int index,
                            aim_location area, bool from_vehicle );
 };
 
@@ -247,7 +263,7 @@ class advanced_inventory_pane
          */
         int index;
         advanced_inv_sortby sortby;
-        WINDOW *window;
+        catacurses::window window;
         std::vector<advanced_inv_listitem> items;
         /**
          * The current filter string.
@@ -276,7 +292,7 @@ class advanced_inventory_pane
         /**
          * Same as the other, but checks the real item.
          */
-        bool is_filtered( const item *it ) const;
+        bool is_filtered( const item &it ) const;
         /**
          * Scroll @ref index, by given offset, set redraw to true,
          * @param offset Must not be 0.
@@ -306,7 +322,7 @@ class advanced_inventory_pane
         /** Only add offset to index, but wrap around! */
         void mod_index( int offset );
 
-        mutable std::map<std::string, bool> filtercache;
+        mutable std::map<std::string, std::function<bool( const item & )>> filtercache;
 };
 
 class advanced_inventory
@@ -316,9 +332,21 @@ class advanced_inventory
         ~advanced_inventory();
 
         void display();
+
+        /**
+         * Converts from screen relative location to game-space relative location
+         * for control rotation in isometric mode.
+        */
+        static aim_location screen_relative_location( aim_location area );
+
+        static char get_location_key( aim_location area );
+
+        advanced_inv_area &get_one_square( const aim_location &loc ) {
+            return squares[loc];
+        }
     private:
         /**
-         * Refers to the two panels, used as index into @ref panels.
+         * Refers to the two panes, used as index into @ref panes.
          */
         enum side {
             left  = 0,
@@ -330,11 +358,12 @@ class advanced_inventory
         const int min_w_width;
         const int max_w_width;
 
-        // swap the panes and WINDOW pointers via std::swap()
+        // swap the panes and windows via std::swap()
         void swap_panes();
 
         // minimap that displays things around character
-        WINDOW *minimap, *mm_border;
+        catacurses::window minimap;
+        catacurses::window mm_border;
         const int minimap_width  = 3;
         const int minimap_height = 3;
         void draw_minimap();
@@ -373,9 +402,9 @@ class advanced_inventory
         static const advanced_inventory_pane null_pane;
         std::array<advanced_inv_area, NUM_AIM_LOCATIONS> squares;
 
-        WINDOW *head;
-        WINDOW *left_window;
-        WINDOW *right_window;
+        catacurses::window head;
+        catacurses::window left_window;
+        catacurses::window right_window;
 
         bool exit;
 
@@ -394,17 +423,18 @@ class advanced_inventory
         void recalc_pane( side p );
         void redraw_pane( side p );
         // Returns the x coordinate where the header started. The header is
-        // displayed right right of it, everything left of it is till free.
+        // displayed right of it, everything left of it is till free.
         int print_header( advanced_inventory_pane &pane, aim_location sel );
         void init();
         /**
          * Translate an action ident from the input context to an aim_location.
+         * @param action Action ident to translate
          * @param ret If the action ident referred to a location, its id is stored
          * here. Only valid when the function returns true.
          * @return true if the action did refer to an location (which has been
          * stored in ret), false otherwise.
          */
-        static bool get_square( const std::string action, aim_location &ret );
+        static bool get_square( const std::string &action, aim_location &ret );
         /**
          * Show the sort-by menu and change the sorting of this pane accordingly.
          * @return whether the sort order was actually changed.
@@ -420,31 +450,16 @@ class advanced_inventory
          */
         bool query_destination( aim_location &def );
         /**
-         * Add the item to the destination area.
-         * @param destarea Where add the item to. This must not be AIM_ALL.
-         * @param new_item The item to add.
-         * @param count The amount to add items to add.
-         * @return Returns the amount of items that weren't addable, 0 if everything went fine.
-         */
-        int add_item( aim_location destarea, item &new_item, int count = 1 );
-        /**
-         * Remove the item from source area. Must not be used on items with area
-         *      AIM_ALL or AIM_INVENTORY!
-         * @param sitem The item reference that should be removed, along with the source area.
-         * @param count The amount to move of said item.
-         * @return Returns the amount of items that weren't removable, 0 if everything went fine.
-         */
-        int remove_item( advanced_inv_listitem &sitem, int count = 1 );
-        /**
          * Move content of source container into destination container (destination pane = AIM_CONTAINER)
          * @param src_container Source container
          * @param dest_container Destination container
          */
-        bool move_content( item &src, item &dest );
+        bool move_content( item &src_container, item &dest_container );
         /**
          * Setup how many items/charges (if counted by charges) should be moved.
          * @param destarea Where to move to. This must not be AIM_ALL.
          * @param sitem The source item, it must contain a valid reference to an item!
+         * @param action The action we are querying
          * @param amount The input value is ignored, contains the amount that should
          *      be moved. Only valid if this returns true.
          * @return false if nothing should/can be moved. True only if there can and
@@ -452,18 +467,9 @@ class advanced_inventory
          *      a valid item count to be moved.
          */
         bool query_charges( aim_location destarea, const advanced_inv_listitem &sitem,
-                            const std::string &action, long &amount );
+                            const std::string &action, int &amount );
 
-        void menu_square( uimenu *menu );
-
-        static char get_location_key( aim_location area );
         static char get_direction_key( aim_location area );
-
-        /**
-         * Converts from screen relative location to game-space relative location
-         * for control rotation in isometric mode.
-        */
-        static aim_location screen_relative_location( aim_location area );
 };
 
 #endif
